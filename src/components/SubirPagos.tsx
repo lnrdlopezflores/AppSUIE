@@ -142,12 +142,6 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
                 {pago.referencia_bancaria && (
                   <Text style={styles.referencia}>Ref: {pago.referencia_bancaria}</Text>
                 )}
-
-                {pago.estatus === 'Pendiente' && (
-                  <TouchableOpacity style={styles.btnAction} onPress={() => setSelectedPago(pago)}>
-                    <Text style={styles.btnActionText}>Subir Pago</Text>
-                  </TouchableOpacity>
-                )}
               </View>
             );
           })

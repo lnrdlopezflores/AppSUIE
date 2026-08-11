@@ -12,9 +12,8 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import SubirPagos from '../components/SubirPagos'; // Ajusta la ruta relativa según corresponda
+import SubirPagos from '../components/SubirPagos';
 
-// Configuración de la API local
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
 const SPACING = {
@@ -25,10 +24,16 @@ const SPACING = {
   five: 24,
 };
 
-// Función para limpiar cadenas serializadas de PHP (ej: s:8:"Leonardo";)
+// Función para obtener la fecha de hoy en la zona horaria local (Formato: YYYY-MM-DD)
+const getFechaLocalActual = (): string => {
+  const date = new Date();
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+  return localDate.toISOString().split('T')[0];
+};
+
 const limpiarTextoPHP = (texto: any): string => {
   if (!texto || typeof texto !== 'string') return '';
-  
   if (texto.includes('s:') && texto.includes('"')) {
     const matches = texto.match(/s:\d+:"([^"]+)"/g);
     if (matches) {
@@ -41,12 +46,10 @@ const limpiarTextoPHP = (texto: any): string => {
 const MAX_CONTENT_WIDTH = 600;
 
 export default function HomeScreen() {
-  // Estados Generales de Autenticación
   const [user, setUser] = useState<any>(null);
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Estados del Docente
   const [docenteInfo, setDocenteInfo] = useState<any>(null);
   const [cargasDocente, setCargasDocente] = useState<any[]>([]);
   const [selectedCarga, setSelectedCarga] = useState<any>(null);
@@ -55,20 +58,19 @@ export default function HomeScreen() {
   const [observaciones, setObservaciones] = useState<{ [key: number]: string }>({});
   const [clasesCompletadas, setClasesCompletadas] = useState<number[]>([]);
   
-  // Estados del Alumno
   const [alumnoInfo, setAlumnoInfo] = useState<any>(null);
   const [horarioAlumno, setHorarioAlumno] = useState<any[]>([]);
 
-  const [fecha] = useState(new Date().toISOString().split('T')[0]);
+  // Fecha calculada dinámicamente con la zona horaria local
+  const [fecha] = useState(getFechaLocalActual());
   const [vistaPagos, setVistaPagos] = useState(false);
 
-  // --- RECONOCIMIENTO DE HISTORIAL PERSISTENTE Y BASE DE DATOS (DOCENTE) ---
+  // --- MONITOREO DE ASISTENCIAS REGISTRADAS HOY ---
   useEffect(() => {
     if (user?.rol === 'Docente' && docenteInfo?.id) {
       const verificarYRecuperarHistorial = async () => {
         try {
-          // 1. Obtener duplicados desde la memoria local del dispositivo
-          const llaveDocente = `clases_completadas_docente_${docenteInfo.id}`;
+          const llaveDocente = `clases_completadas_${fecha}_docente_${docenteInfo.id}`;
           let locales: number[] = [];
           
           if (Platform.OS === 'web') {
@@ -79,37 +81,34 @@ export default function HomeScreen() {
             if (historialGuardado) locales = JSON.parse(historialGuardado);
           }
 
-          // 2. Sincronizar y verificar contra la Base de Datos en tiempo real para la fecha de hoy
+          // Consultar registros en la BD para la fecha local
           const resAsistencias = await fetch(`${API_BASE_URL}/asistencias`);
-          const todasAsistencias = await resAsistencias.json();
-          
-          // Filtrar qué IDs de cargas ya registran asistencia hoy en la BD
-          const completadasEnBD = todasAsistencias
-            .filter((asist: any) => asist.fecha === fecha)
-            .map((asist: any) => asist.carga_academica_id);
+          if (resAsistencias.ok) {
+            const todasAsistencias = await resAsistencias.json();
+            
+            const completadasEnBD = todasAsistencias
+              .filter((asist: any) => asist.fecha === fecha)
+              .map((asist: any) => asist.carga_academica_id);
 
-          // Fusionar ambos historiales eliminando duplicados
-          const historialFusionado = Array.from(new Set([...locales, ...completadasEnBD]));
-          setClasesCompletadas(historialFusionado);
-
+            const historialFusionado = Array.from(new Set([...locales, ...completadasEnBD]));
+            setClasesCompletadas(historialFusionado);
+          }
         } catch (e) {
-          console.error("Error sincronizando historial de bloqueos:", e);
+          console.error("Error sincronizando estado diario:", e);
         }
       };
 
       verificarYRecuperarHistorial();
       cargarCargasDocente(docenteInfo.id);
     }
-  }, [docenteInfo]);
+  }, [docenteInfo, fecha]);
 
-  // --- CARGA AUTOMÁTICA DE HORARIO (ALUMNO) ---
   useEffect(() => {
     if (user?.rol === 'Estudiante' && alumnoInfo?.grupo_id) {
       cargarHorarioAlumno(alumnoInfo.grupo_id);
     }
   }, [alumnoInfo]);
 
-  // --- INICIO DE SESIÓN MULTI-ROL ---
   const handleLogin = async () => {
     if (!username.trim()) {
       Alert.alert('Error', 'Por favor ingresa tu usuario.');
@@ -118,6 +117,7 @@ export default function HomeScreen() {
     setLoading(true);
     try {
       const resUsers = await fetch(`${API_BASE_URL}/usuarios`);
+      if (!resUsers.ok) throw new Error('Error al conectar con el servidor.');
       const usuarios = await resUsers.json();
       const foundUser = usuarios.find((u: any) => u.username === username.trim() && u.activo);
 
@@ -127,23 +127,31 @@ export default function HomeScreen() {
 
       if (foundUser.rol === 'Docente') {
         const resDocentes = await fetch(`${API_BASE_URL}/docentes`);
+        if (!resDocentes.ok) throw new Error(`Error en el servidor (${resDocentes.status}).`);
+
         const docentes = await resDocentes.json();
-        const foundDocente = docentes.find((d: any) => d.usuario_id === foundUser.id);
-        if (!foundDocente) throw new Error('No se encontraron detalles de docente.');
+        const listaDocentes = Array.isArray(docentes) ? docentes : docentes.data || [];
+        const foundDocente = listaDocentes.find((d: any) => d.usuario_id === foundUser.id);
+        
+        if (!foundDocente) throw new Error('No se encontraron detalles del docente.');
         
         setUser(foundUser);
         setDocenteInfo(foundDocente);
 
       } else if (foundUser.rol === 'Estudiante') {
         const resAlumnos = await fetch(`${API_BASE_URL}/alumnos`);
+        if (!resAlumnos.ok) throw new Error(`Error en el servidor (${resAlumnos.status}).`);
+        
         const alumnos = await resAlumnos.json();
-        const foundAlumno = alumnos.find((a: any) => a.usuario_id === foundUser.id);
+        const listaAlumnos = Array.isArray(alumnos) ? alumnos : alumnos.data || [];
+        const foundAlumno = listaAlumnos.find((a: any) => a.usuario_id === foundUser.id);
+        
         if (!foundAlumno) throw new Error('No se encontraron detalles del alumno.');
         
         setUser(foundUser);
         setAlumnoInfo(foundAlumno);
       } else {
-        throw new Error('Este portal solo admite accesos para Docentes o Estudiantes.');
+        throw new Error('Rol no soportado.');
       }
     } catch (error: any) {
       Alert.alert('Error de Acceso', error.message);
@@ -151,24 +159,29 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
-
-  // --- PETICIONES API ---
+  
   const cargarCargasDocente = async (docenteId: number) => {
     try {
       const res = await fetch(`${API_BASE_URL}/carga-academica`);
-      const data = await res.json();
-      setCargasDocente(data.filter((c: any) => c.docente_id === docenteId));
-    } catch (error) { console.error(error); }
+      if (!res.ok) throw new Error(`Error: ${res.status}`);
+
+      const responseData = await res.json();
+      const lista = Array.isArray(responseData) ? responseData : responseData.data || [];
+      setCargasDocente(lista.filter((c: any) => c.docente_id === docenteId));
+    } catch (error) { 
+      console.error("Error en cargas:", error); 
+    }
   };
 
   const cargarHorarioAlumno = async (grupoId: number) => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/carga-academica`);
-      const data = await res.json();
-      setHorarioAlumno(data.filter((c: any) => c.grupo_id === grupoId));
+      const responseData = await res.json();
+      const lista = Array.isArray(responseData) ? responseData : responseData.data || [];
+      setHorarioAlumno(lista.filter((c: any) => c.grupo_id === grupoId));
     } catch (error) {
-      console.error(error);
+      console.error("Error en horario:", error);
     } finally {
       setLoading(false);
     }
@@ -176,7 +189,7 @@ export default function HomeScreen() {
 
   const handleSelectCarga = async (carga: any) => {
     if (clasesCompletadas.includes(carga.id)) {
-      Alert.alert('Grupo Bloqueado', 'Ya se ha guardado el reporte de asistencia para este grupo hoy.');
+      Alert.alert('Asistencia Registrada', `Ya guardaste el pase de lista de hoy (${fecha}) para este grupo.`);
       return;
     }
     setSelectedCarga(carga);
@@ -219,12 +232,13 @@ export default function HomeScreen() {
     }
 
     setLoading(false);
-    Alert.alert('Pase de Lista', `Completado. Se registraron ${guardados} asistencias.`);
+    Alert.alert('Pase de Lista', `Completado para la fecha ${fecha}. Se registraron ${guardados} asistencias.`);
     
-    // Almacenar el bloqueo de forma local y actualizar la UI
     const nuevasClases = [...clasesCompletadas, selectedCarga.id];
     setClasesCompletadas(nuevasClases);
-    const llave = `clases_completadas_docente_${docenteInfo.id}`;
+    
+    // Guardar usando la llave indexada por fecha local
+    const llave = `clases_completadas_${fecha}_docente_${docenteInfo.id}`;
     if (Platform.OS === 'web') localStorage.setItem(llave, JSON.stringify(nuevasClases));
     else await SecureStore.setItemAsync(llave, JSON.stringify(nuevasClases));
 
@@ -243,35 +257,31 @@ export default function HomeScreen() {
     setVistaPagos(false);
   };
 
-  // --- VISTA: LOGIN ---
   if (!user) {
     return (
       <View style={styles.centerContainer}>
         <View style={styles.loginCard}>
           <Text style={[styles.textCenter, styles.titleText]}>SUIE Móvil</Text>
           <Text style={[styles.textCenter, { color: '#666', marginBottom: SPACING.four, fontSize: 14 }]}>
-            Portal Educativo Integrado
+            Portal Educativo
           </Text>
           <TextInput
             style={styles.input}
-            placeholder="Matrícula o Control (Ej: 22040023)"
+            placeholder="Matrícula o Control"
             placeholderTextColor="#888"
             autoCapitalize="none"
             value={username}
             onChangeText={setUsername}
           />
           <TouchableOpacity style={styles.btnPrimary} onPress={handleLogin} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Ingresar al Sistema</Text>}
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Ingresar</Text>}
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // --- PORTAL DE ESTUDIANTES (HORARIOS) ---
-// --- PORTAL DE ESTUDIANTES ---
   if (user.rol === 'Estudiante') {
-    // Si la bandera está activa, muestra el archivo externo de pagos
     if (vistaPagos) {
       return <SubirPagos alumnoId={alumnoInfo?.id} onBack={() => setVistaPagos(false)} />;
     }
@@ -291,14 +301,13 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* NUEVO BOTÓN: Acceso Financiero */}
           <TouchableOpacity 
             style={[styles.infoBanner, { backgroundColor: '#00a6ed', borderColor: '#0084bd', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
             onPress={() => setVistaPagos(true)}
           >
             <View>
               <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>💳 Estado Financiero y Pagos</Text>
-              <Text style={{ fontSize: 12, color: '#e2f4ff', marginTop: 2 }}>Revisa tus deudas y sube tus comprobantes aquí</Text>
+              <Text style={{ fontSize: 12, color: '#e2f4ff', marginTop: 2 }}>Revisa tus deudas y comprobantes</Text>
             </View>
             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>→</Text>
           </TouchableOpacity>
@@ -308,21 +317,14 @@ export default function HomeScreen() {
             <Text style={{ fontSize: 13, color: '#4a5568', marginTop: 2 }}>
               Especialidad: {horarioAlumno[0]?.grupo?.especialidad || 'Cargando...'}
             </Text>
-            <Text style={{ fontSize: 12, color: '#718096', marginTop: 4 }}>
-              Semestre y Turno: {horarioAlumno[0]?.grupo?.semestre}°"{horarioAlumno[0]?.grupo?.grupo}" - {horarioAlumno[0]?.grupo?.turno}
-            </Text>
           </View>
 
-          {/* ... El resto de tu diseño del horario semanal sigue exactamente igual ... */}
-
           <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1a202c', marginTop: SPACING.two, marginBottom: SPACING.one }}>
-            Horario Semanal de Clases
+            Horario Semanal
           </Text>
 
           {loading ? (
             <ActivityIndicator size="large" color="#00a6ed" style={{ marginTop: SPACING.four }} />
-          ) : horarioAlumno.length === 0 ? (
-            <Text style={{ textAlign: 'center', color: '#888', marginTop: SPACING.four }}>No hay asignaciones cargadas para tu grupo.</Text>
           ) : (
             horarioAlumno.map((item) => (
               <View key={item.id} style={styles.cargaCard}>
@@ -351,7 +353,7 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DE DOCENTES: PASAR ASISTENCIA ---
+  // --- PORTAL DOCENTE: FORMULARIO DE PASE DE LISTA ---
   if (selectedCarga) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -369,7 +371,7 @@ export default function HomeScreen() {
             <Text style={{ fontSize: 13, color: '#4a5568', marginTop: 2 }}>
               Grupo: {selectedCarga.grupo?.semestre}°"{selectedCarga.grupo?.grupo}" - {selectedCarga.grupo?.especialidad}
             </Text>
-            <Text style={{ fontSize: 12, color: '#718096', marginTop: 4 }}>Fecha: {fecha}</Text>
+            <Text style={{ fontSize: 12, color: '#718096', marginTop: 4 }}>Fecha de hoy: {fecha}</Text>
           </View>
 
           {loading ? (
@@ -408,7 +410,7 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DE DOCENTES: DASHBOARD ---
+  // --- PORTAL DOCENTE: DASHBOARD Y MONITOR DE PENDIENTES ---
   const clasesRestantesCount = cargasDocente.length - clasesCompletadas.length;
 
   return (
@@ -416,7 +418,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View>
           <Text style={{ fontWeight: '700', fontSize: 17, color: '#1a202c' }}>Prof. {docenteInfo?.nombre}</Text>
-          <Text style={{ fontSize: 12, color: '#4a5568' }}>Portal del Docente</Text>
+          <Text style={{ fontSize: 12, color: '#00a6ed', fontWeight: '500' }}>📅 Fecha Local: {fecha}</Text>
         </View>
         <TouchableOpacity style={styles.btnLogout} onPress={handleLogout}>
           <Text style={{ color: '#ff3b30', fontSize: 12, fontWeight: 'bold' }}>Salir</Text>
@@ -424,7 +426,7 @@ export default function HomeScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1a202c', marginBottom: SPACING.two }}>Resumen de Hoy</Text>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1a202c', marginBottom: SPACING.two }}>Estado de Asistencias Hoy</Text>
         <View style={styles.metricsContainer}>
           <View style={[styles.metricCard, { backgroundColor: '#e2f4ff', borderColor: '#bce4ff' }]}>
             <Text style={[styles.metricNumber, { color: '#0070a3' }]}>{clasesCompletadas.length}</Text>
@@ -432,12 +434,12 @@ export default function HomeScreen() {
           </View>
           <View style={[styles.metricCard, { backgroundColor: '#fff3cd', borderColor: '#ffeeba' }]}>
             <Text style={[styles.metricNumber, { color: '#856404' }]}>{clasesRestantesCount}</Text>
-            <Text style={styles.metricLabel}>Clases Pendientes</Text>
+            <Text style={styles.metricLabel}>Pendientes Hoy</Text>
           </View>
         </View>
 
         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1a202c', marginTop: SPACING.three, marginBottom: SPACING.two }}>
-          Selecciona un Grupo
+          Tus Clases Asignadas
         </Text>
 
         {cargasDocente.map((carga) => {
@@ -445,7 +447,10 @@ export default function HomeScreen() {
           return (
             <TouchableOpacity 
               key={carga.id} 
-              style={[styles.cargaCard, yaCompletada && styles.cargaCardDisabled]} 
+              style={[
+                styles.cargaCard, 
+                yaCompletada ? styles.cargaCardDisabled : styles.cargaCardPending
+              ]} 
               onPress={() => handleSelectCarga(carga)}
               activeOpacity={yaCompletada ? 1 : 0.7}
             >
@@ -453,18 +458,25 @@ export default function HomeScreen() {
                 <View style={styles.tagGrupo}>
                   <Text style={styles.tagTexto}>Grupo {carga.grupo?.semestre}°"{carga.grupo?.grupo}"</Text>
                 </View>
-                {yaCompletada && (
+                
+                {/* Indicadores dinámicos de estado */}
+                {yaCompletada ? (
                   <View style={styles.completedBadge}>
-                    <Text style={styles.completedBadgeText}>✓ Completado</Text>
+                    <Text style={styles.completedBadgeText}>✓ Asistencia Tomada</Text>
+                  </View>
+                ) : (
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingBadgeText}>⚠️ Falta Pasar Lista</Text>
                   </View>
                 )}
               </View>
+
               <Text style={[{ fontWeight: '600', fontSize: 16, marginTop: SPACING.two, color: '#2d3748' }, yaCompletada && { color: '#a0aec0' }]}>
                 {carga.materia?.nombre}
               </Text>
               <Text style={{ fontSize: 13, color: '#718096', marginTop: 4 }}>📍 Aula: {carga.aula || 'Por asignar'}</Text>
               <Text style={[{ fontSize: 13, color: '#00a6ed', marginTop: 4, fontWeight: '500' }, yaCompletada && { color: '#a0aec0' }]}>
-                📅 {carga.horario}
+                ⏰ {carga.horario}
               </Text>
             </TouchableOpacity>
           );
@@ -491,11 +503,14 @@ const styles = StyleSheet.create({
   metricNumber: { fontSize: 22, fontWeight: 'bold' },
   metricLabel: { fontSize: 12, color: '#4a5568', marginTop: 2 },
   cargaCard: { backgroundColor: '#fff', padding: SPACING.four, borderRadius: SPACING.three, borderWidth: 1, borderColor: '#edf2f7', marginBottom: 4 },
+  cargaCardPending: { borderLeftWidth: 4, borderLeftColor: '#f6ad55' },
   cargaCardDisabled: { opacity: 0.6, backgroundColor: '#edf2f7', borderColor: '#cbd5e0' },
   tagGrupo: { alignSelf: 'flex-start', backgroundColor: '#cae2e6', paddingHorizontal: SPACING.three, paddingVertical: 4, borderRadius: 50 },
   tagTexto: { fontSize: 11, fontWeight: 'bold', color: '#2d3748' },
   completedBadge: { backgroundColor: '#c6f6d5', paddingHorizontal: SPACING.two, paddingVertical: 2, borderRadius: 4 },
   completedBadgeText: { color: '#22543d', fontSize: 11, fontWeight: 'bold' },
+  pendingBadge: { backgroundColor: '#feebc8', paddingHorizontal: SPACING.two, paddingVertical: 2, borderRadius: 4 },
+  pendingBadgeText: { color: '#744210', fontSize: 11, fontWeight: 'bold' },
   infoBanner: { backgroundColor: '#cae2e6', padding: SPACING.four, borderRadius: SPACING.three, borderWidth: 1, borderColor: '#b2d7dc' },
   alumnoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: SPACING.three, borderRadius: SPACING.three, borderWidth: 1, borderColor: '#edf2f7', gap: SPACING.two },
   asistenciaRow: { flexDirection: 'row', gap: 6 },
