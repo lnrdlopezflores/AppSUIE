@@ -24,7 +24,8 @@ const SPACING = {
   five: 24,
 };
 
-// Función para obtener la fecha de hoy en la zona horaria local (Formato: YYYY-MM-DD)
+const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+
 const getFechaLocalActual = (): string => {
   const date = new Date();
   const offset = date.getTimezoneOffset();
@@ -60,12 +61,11 @@ export default function HomeScreen() {
   
   const [alumnoInfo, setAlumnoInfo] = useState<any>(null);
   const [horarioAlumno, setHorarioAlumno] = useState<any[]>([]);
+  const [diaSeleccionado, setDiaSeleccionado] = useState<string>('Lunes');
 
-  // Fecha calculada dinámicamente con la zona horaria local
   const [fecha] = useState(getFechaLocalActual());
   const [vistaPagos, setVistaPagos] = useState(false);
 
-  // --- MONITOREO DE ASISTENCIAS REGISTRADAS HOY ---
   useEffect(() => {
     if (user?.rol === 'Docente' && docenteInfo?.id) {
       const verificarYRecuperarHistorial = async () => {
@@ -81,11 +81,9 @@ export default function HomeScreen() {
             if (historialGuardado) locales = JSON.parse(historialGuardado);
           }
 
-          // Consultar registros en la BD para la fecha local
           const resAsistencias = await fetch(`${API_BASE_URL}/asistencias`);
           if (resAsistencias.ok) {
             const todasAsistencias = await resAsistencias.json();
-            
             const completadasEnBD = todasAsistencias
               .filter((asist: any) => asist.fecha === fecha)
               .map((asist: any) => asist.carga_academica_id);
@@ -121,9 +119,7 @@ export default function HomeScreen() {
       const usuarios = await resUsers.json();
       const foundUser = usuarios.find((u: any) => u.username === username.trim() && u.activo);
 
-      if (!foundUser) {
-        throw new Error('Usuario no válido o inactivo.');
-      }
+      if (!foundUser) throw new Error('Usuario no válido o inactivo.');
 
       if (foundUser.rol === 'Docente') {
         const resDocentes = await fetch(`${API_BASE_URL}/docentes`);
@@ -237,7 +233,6 @@ export default function HomeScreen() {
     const nuevasClases = [...clasesCompletadas, selectedCarga.id];
     setClasesCompletadas(nuevasClases);
     
-    // Guardar usando la llave indexada por fecha local
     const llave = `clases_completadas_${fecha}_docente_${docenteInfo.id}`;
     if (Platform.OS === 'web') localStorage.setItem(llave, JSON.stringify(nuevasClases));
     else await SecureStore.setItemAsync(llave, JSON.stringify(nuevasClases));
@@ -281,10 +276,45 @@ export default function HomeScreen() {
     );
   }
 
+ // --- PORTAL ESTUDIANTE (CALENDARIO DE HORARIOS) ---
   if (user.rol === 'Estudiante') {
     if (vistaPagos) {
       return <SubirPagos alumnoId={alumnoInfo?.id} onBack={() => setVistaPagos(false)} />;
     }
+
+    // LISTA DE DÍAS PARA EVALUAR RANGOS
+    const diasSemanaOrden = ['lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes'];
+
+    // FILTRO INTELIGENTE DE MATERIAS POR DÍA
+    const clasesDelDia = horarioAlumno.filter((item) => {
+      const horarioStr = (item.horario || '').toLowerCase();
+      const diaActual = diaSeleccionado.toLowerCase();
+
+      // 1. Caso: Rango con "a" o "al" (ej. "Lunes a Viernes", "Lunes al Jueves")
+      const rangoMatch = horarioStr.match(/(lunes|martes|miércoles|miercoles|jueves|viernes)\s+a[l]?\s+(lunes|martes|miércoles|miercoles|jueves|viernes)/);
+      if (rangoMatch) {
+        const diaInicio = rangoMatch[1].replace('miercoles', 'miércoles');
+        const diaFin = rangoMatch[2].replace('miercoles', 'miércoles');
+        
+        const idxInicio = diasSemanaOrden.indexOf(diaInicio);
+        const idxFin = diasSemanaOrden.indexOf(diaFin);
+        const idxActual = diasSemanaOrden.indexOf(diaActual.replace('miercoles', 'miércoles'));
+
+        if (idxInicio !== -1 && idxFin !== -1 && idxActual !== -1) {
+          return idxActual >= idxInicio && idxActual <= idxFin;
+        }
+      }
+
+      // 2. Caso: Días específicos separados por "y", "e" o comas (ej. "Lunes y Miércoles")
+      const regexDiaExacto = new RegExp(`\\b${diaActual.replace('miércoles', 'miér?coles')}\\b`, 'i');
+      if (regexDiaExacto.test(horarioStr)) {
+        return true;
+      }
+
+      // 3. Fallback: Si el horario no especifica ningún día (ej. solo dice "08:00 - 10:00"), se muestra en todos los días
+      const tieneAlgunDia = DIAS_SEMANA.some(d => horarioStr.includes(d.toLowerCase()));
+      return !tieneAlgunDia;
+    });
 
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -320,30 +350,55 @@ export default function HomeScreen() {
           </View>
 
           <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1a202c', marginTop: SPACING.two, marginBottom: SPACING.one }}>
-            Horario Semanal
+            Calendario Escolar Semanal
           </Text>
+
+          {/* PESTAÑAS DE DÍAS DE LA SEMANA */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.calendarTabs}>
+            {DIAS_SEMANA.map((dia) => {
+              const active = diaSeleccionado === dia;
+              return (
+                <TouchableOpacity
+                  key={dia}
+                  onPress={() => setDiaSeleccionado(dia)}
+                  style={[styles.tabItem, active && styles.tabItemActive]}
+                >
+                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{dia}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
 
           {loading ? (
             <ActivityIndicator size="large" color="#00a6ed" style={{ marginTop: SPACING.four }} />
+          ) : clasesDelDia.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <Text style={{ color: '#a0aec0', fontSize: 14, fontWeight: '500' }}>
+                ☕ No hay asignaciones programadas para el {diaSeleccionado}.
+              </Text>
+            </View>
           ) : (
-            horarioAlumno.map((item) => (
-              <View key={item.id} style={styles.cargaCard}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontWeight: '700', fontSize: 16, color: '#2d3748', flex: 1 }}>
-                    {item.materia?.nombre}
-                  </Text>
-                  <View style={[styles.tagGrupo, { backgroundColor: '#e2f4ff' }]}>
-                    <Text style={[styles.tagTexto, { color: '#0070a3' }]}>{item.materia?.clave}</Text>
-                  </View>
+            clasesDelDia.map((item) => (
+              <View key={item.id} style={styles.calendarCard}>
+                <View style={styles.timeBadge}>
+                  <Text style={styles.timeBadgeText}>⏰ {item.horario || 'Por definir'}</Text>
                 </View>
                 
-                <Text style={{ fontSize: 13, color: '#4a5568', marginTop: SPACING.one, fontWeight: '500' }}>
-                  👨‍🏫 Docente: {limpiarTextoPHP(item.docente?.nombre)} {limpiarTextoPHP(item.docente?.apellido_paterno)}
-                </Text>
-                
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: SPACING.two, paddingTop: 2, borderTopWidth: 1, borderTopColor: '#f7fafc' }}>
-                  <Text style={{ fontSize: 13, color: '#718096' }}>📍 Aula: {item.aula || 'Por definir'}</Text>
-                  <Text style={{ fontSize: 13, color: '#00a6ed', fontWeight: 'bold' }}>⏰ {item.horario}</Text>
+                <View style={{ flex: 1, paddingLeft: SPACING.three }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '700', fontSize: 16, color: '#2d3748', flex: 1 }}>
+                      {item.materia?.nombre}
+                    </Text>
+                    <View style={[styles.tagGrupo, { backgroundColor: '#e2f4ff' }]}>
+                      <Text style={[styles.tagTexto, { color: '#0070a3' }]}>{item.materia?.clave}</Text>
+                    </View>
+                  </View>
+                  
+                  <Text style={{ fontSize: 13, color: '#4a5568', marginTop: 4, fontWeight: '500' }}>
+                    👨‍🏫 {limpiarTextoPHP(item.docente?.nombre)} {limpiarTextoPHP(item.docente?.apellido_paterno)}
+                  </Text>
+                  
+                  <Text style={{ fontSize: 12, color: '#718096', marginTop: 2 }}>📍 Aula: {item.aula || 'Por definir'}</Text>
                 </View>
               </View>
             ))
@@ -353,7 +408,7 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DOCENTE: FORMULARIO DE PASE DE LISTA ---
+  // --- PORTAL DOCENTE: FORMULARIO PASE LISTA ---
   if (selectedCarga) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -410,7 +465,7 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DOCENTE: DASHBOARD Y MONITOR DE PENDIENTES ---
+  // --- PORTAL DOCENTE: DASHBOARD ---
   const clasesRestantesCount = cargasDocente.length - clasesCompletadas.length;
 
   return (
@@ -459,7 +514,6 @@ export default function HomeScreen() {
                   <Text style={styles.tagTexto}>Grupo {carga.grupo?.semestre}°"{carga.grupo?.grupo}"</Text>
                 </View>
                 
-                {/* Indicadores dinámicos de estado */}
                 {yaCompletada ? (
                   <View style={styles.completedBadge}>
                     <Text style={styles.completedBadgeText}>✓ Asistencia Tomada</Text>
@@ -505,6 +559,15 @@ const styles = StyleSheet.create({
   cargaCard: { backgroundColor: '#fff', padding: SPACING.four, borderRadius: SPACING.three, borderWidth: 1, borderColor: '#edf2f7', marginBottom: 4 },
   cargaCardPending: { borderLeftWidth: 4, borderLeftColor: '#f6ad55' },
   cargaCardDisabled: { opacity: 0.6, backgroundColor: '#edf2f7', borderColor: '#cbd5e0' },
+  calendarTabs: { flexDirection: 'row', marginBottom: SPACING.two },
+  tabItem: { paddingHorizontal: SPACING.four, paddingVertical: 8, borderRadius: 20, backgroundColor: '#edf2f7', marginRight: 8 },
+  tabItemActive: { backgroundColor: '#00a6ed' },
+  tabText: { fontSize: 13, fontWeight: '600', color: '#4a5568' },
+  tabTextActive: { color: '#fff' },
+  calendarCard: { flexDirection: 'row', backgroundColor: '#fff', padding: SPACING.three, borderRadius: SPACING.three, borderWidth: 1, borderColor: '#edf2f7', marginBottom: 8, alignItems: 'center' },
+  timeBadge: { backgroundColor: '#cae2e6', padding: 8, borderRadius: 8, justifyContent: 'center', alignItems: 'center', width: 95 },
+  timeBadgeText: { color: '#0070a3', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
+  emptyStateContainer: { padding: SPACING.five, backgroundColor: '#fff', borderRadius: SPACING.three, borderWidth: 1, borderColor: '#edf2f7', alignItems: 'center' },
   tagGrupo: { alignSelf: 'flex-start', backgroundColor: '#cae2e6', paddingHorizontal: SPACING.three, paddingVertical: 4, borderRadius: 50 },
   tagTexto: { fontSize: 11, fontWeight: 'bold', color: '#2d3748' },
   completedBadge: { backgroundColor: '#c6f6d5', paddingHorizontal: SPACING.two, paddingVertical: 2, borderRadius: 4 },
