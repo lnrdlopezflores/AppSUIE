@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
-  TextInput,
+  StyleSheet,
+  ScrollView,
   TouchableOpacity,
-  View
+  TextInput,
+  ActivityIndicator,
+  Alert
 } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
@@ -18,6 +19,7 @@ interface SubirPagosProps {
 }
 
 export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
+  const { colors } = useTheme();
   const [pagos, setPagos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPago, setSelectedPago] = useState<any>(null);
@@ -28,7 +30,8 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
     try {
       const res = await fetch(`${API_BASE_URL}/pagos`);
       const data = await res.json();
-      const misPagos = data.filter((p: any) => p.alumno_id === alumnoId);
+      const lista = Array.isArray(data) ? data : data.data || [];
+      const misPagos = lista.filter((p: any) => p.alumno_id === alumnoId);
       setPagos(misPagos);
     } catch (error) {
       Alert.alert('Error', 'No se pudieron recuperar las órdenes de pago.');
@@ -76,31 +79,31 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
 
   const getEstatusColor = (estatus: string) => {
     switch (estatus) {
-      case 'Pagado': return { bg: '#E7F3EC', text: '#0F7F41', border: '#0F7F41' };
-      case 'Pendiente': return { bg: '#FDEEE4', text: '#E66711', border: '#E66711' };
+      case 'Pagado': return { bg: colors.primaryLight, text: colors.primary, border: colors.primary };
+      case 'Pendiente': return { bg: colors.accentLight, text: colors.accent, border: colors.accent };
       case 'Condonado': return { bg: '#f1f5f9', text: '#64748b', border: '#cbd5e1' };
-      default: return { bg: '#F5E8ED', text: '#841B44', border: '#841B44' };
+      default: return { bg: colors.wineLight, text: colors.wine, border: colors.wine };
     }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.btnBack}>
-          <Text style={styles.backBtnText}>← Volver al Horario</Text>
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>
+          <Text style={[styles.backBtnText, { color: colors.primary }]}>← Volver al Horario</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Control de Pagos</Text>
+        <Text style={[styles.headerTitle, { color: colors.primary }]}>Control de Pagos</Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {loading && !selectedPago ? (
-          <ActivityIndicator size="large" color="#0F7F41" style={{ marginTop: 40 }} />
+          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : selectedPago ? (
-          <View style={styles.formCard}>
-            <Text style={styles.formTitle}>Registrar Comprobante</Text>
+          <View style={[styles.formCard, { borderColor: colors.primary }]}>
+            <Text style={[styles.formTitle, { color: colors.primary }]}>Registrar Comprobante</Text>
             <Text style={styles.formSubtitle}>{selectedPago.concepto}</Text>
-            <Text style={styles.formMonto}>Monto requerido: ${selectedPago.monto}</Text>
+            <Text style={[styles.formMonto, { color: colors.accent }]}>Monto requerido: ${selectedPago.monto}</Text>
 
             <TextInput
               style={styles.input}
@@ -111,12 +114,12 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
               onChangeText={setReferencia}
             />
 
-            <TouchableOpacity style={styles.btnSubmit} onPress={handleRegistrarPago} disabled={loading}>
+            <TouchableOpacity style={[styles.btnSubmit, { backgroundColor: colors.primary }]} onPress={handleRegistrarPago} disabled={loading}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Enviar Referencia</Text>}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.btnCancel} onPress={() => setSelectedPago(null)}>
-              <Text style={styles.cancelText}>Cancelar Operación</Text>
+              <Text style={[styles.cancelText, { color: colors.wine }]}>Cancelar Operación</Text>
             </TouchableOpacity>
           </View>
         ) : pagos.length === 0 ? (
@@ -125,20 +128,24 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
           pagos.map((pago) => {
             const colores = getEstatusColor(pago.estatus);
             return (
-              <View key={pago.id} style={styles.pagoCard}>
+              <View key={pago.id} style={[styles.pagoCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
                 <View style={styles.row}>
-                  <Text style={styles.concepto}>{pago.concepto}</Text>
+                  <Text style={[styles.concepto, { color: colors.textPrimary }]}>{pago.concepto}</Text>
                   <View style={[styles.badge, { backgroundColor: colores.bg, borderColor: colores.border }]}>
                     <Text style={[styles.badgeText, { color: colores.text }]}>{pago.estatus}</Text>
                   </View>
                 </View>
 
-                <Text style={styles.monto}>Importe: ${pago.monto}</Text>
+                <Text style={[styles.monto, { color: colors.primary }]}>Importe: ${pago.monto}</Text>
                 {pago.referencia_bancaria && (
-                  <Text style={styles.referencia}>Folio: {pago.referencia_bancaria}</Text>
+                  <Text style={[styles.referencia, { color: colors.wine }]}>Folio: {pago.referencia_bancaria}</Text>
                 )}
 
-                
+                {pago.estatus === 'Pendiente' && (
+                  <TouchableOpacity style={[styles.btnAction, { backgroundColor: colors.accent }]} onPress={() => setSelectedPago(pago)}>
+                    <Text style={styles.btnActionText}>Subir Comprobante / Referencia</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           })
@@ -149,7 +156,7 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1 },
   header: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
@@ -157,31 +164,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, 
     paddingVertical: 14, 
     borderBottomWidth: 1, 
-    borderBottomColor: '#edf2f7', 
     backgroundColor: '#fff' 
   },
-  btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#E7F3EC' },
-  backBtnText: { color: '#0F7F41', fontWeight: '800', fontSize: 13 },
-  headerTitle: { fontSize: 16, fontWeight: '800', color: '#0F7F41' },
+  btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
+  backBtnText: { fontWeight: '800', fontSize: 13 },
+  headerTitle: { fontSize: 16, fontWeight: '800' },
   scrollContent: { padding: 16, width: '100%', maxWidth: 600, alignSelf: 'center' },
   emptyText: { textAlign: 'center', color: '#64748b', marginTop: 40, fontWeight: '600' },
   pagoCard: { 
-    backgroundColor: '#fff', 
     padding: 16, 
     borderRadius: 16, 
     borderWidth: 1, 
-    borderColor: '#e2e8f0', 
     marginBottom: 12 
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  concepto: { fontSize: 16, fontWeight: '800', color: '#1e293b', flex: 1 },
-  monto: { fontSize: 14, color: '#0F7F41', marginTop: 4, fontWeight: '800' },
-  referencia: { fontSize: 12, color: '#841B44', marginTop: 2, fontWeight: '600' },
+  concepto: { fontSize: 16, fontWeight: '800', flex: 1 },
+  monto: { fontSize: 14, marginTop: 4, fontWeight: '800' },
+  referencia: { fontSize: 12, marginTop: 2, fontWeight: '600' },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 50, borderWidth: 1 },
   badgeText: { fontSize: 11, fontWeight: '800' },
   btnAction: { 
     marginTop: 12, 
-    backgroundColor: '#E66711', // Naranja para llamadas de acción financiera
     paddingVertical: 10, 
     borderRadius: 10, 
     alignItems: 'center' 
@@ -192,11 +195,10 @@ const styles = StyleSheet.create({
     padding: 22, 
     borderRadius: 20, 
     borderWidth: 2, 
-    borderColor: '#0F7F41' 
   },
-  formTitle: { fontSize: 20, fontWeight: '900', color: '#0F7F41', textAlign: 'center' },
+  formTitle: { fontSize: 20, fontWeight: '900', textAlign: 'center' },
   formSubtitle: { fontSize: 15, color: '#475569', textAlign: 'center', marginTop: 4, fontWeight: '600' },
-  formMonto: { fontSize: 15, color: '#E66711', fontWeight: '800', textAlign: 'center', marginTop: 6, marginBottom: 20 },
+  formMonto: { fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 6, marginBottom: 20 },
   input: { 
     height: 50, 
     borderColor: '#cbd5e1', 
@@ -210,12 +212,11 @@ const styles = StyleSheet.create({
   },
   btnSubmit: { 
     height: 50, 
-    backgroundColor: '#0F7F41', 
     borderRadius: 12, 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
   btnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   btnCancel: { marginTop: 12, alignItems: 'center', paddingVertical: 8 },
-  cancelText: { color: '#841B44', fontSize: 14, fontWeight: '700' }
+  cancelText: { fontSize: 14, fontWeight: '700' }
 });

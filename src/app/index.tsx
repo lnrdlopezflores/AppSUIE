@@ -4,17 +4,23 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import SubirPagos from '../components/SubirPagos';
+
+import AdminPanelTheme from '../components/AdminPanelTheme';
+import DocenteAsesoriaView from '../components/DocenteAsesor';
 import ProyectoTitulacionView from '../components/ProyectoTitulacion';
+import SubirPagos from '../components/SubirPagos';
+import { ThemeProvider, useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
 
@@ -44,16 +50,34 @@ const limpiarTextoPHP = (texto: any): string => {
     }
   }
   return texto;
-};  
+};
 
 const MAX_CONTENT_WIDTH = 600;
 
-export default function HomeScreen() {
+function MainApp() {
+  const { colors, isVedaElectoral } = useTheme();
+
   const [user, setUser] = useState<any>(null);
   const [username, setUsername] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Control del Menú Lateral
+  const [menuLateralVisible, setMenuLateralVisible] = useState(false);
+
+  // Modal de Notificación Normativa Electoral
+  const [mostrarModalNormativo, setMostrarModalNormativo] = useState(false);
+
+  // Vistas Alumno
   const [vistaTitulacion, setVistaTitulacion] = useState(false);
+  const [vistaPagos, setVistaPagos] = useState(false);
+
+  // Vistas Docente
+  const [vistaAsesoriaDocente, setVistaAsesoriaDocente] = useState(false);
+  const [proyectosAsesoradosCount, setProyectosAsesoradosCount] = useState(0);
+
+  // Vistas Admin
+  const [vistaAdminTheme, setVistaAdminTheme] = useState(false);
 
   const [docenteInfo, setDocenteInfo] = useState<any>(null);
   const [cargasDocente, setCargasDocente] = useState<any[]>([]);
@@ -68,7 +92,6 @@ export default function HomeScreen() {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string>('Lunes');
 
   const [fecha] = useState(getFechaLocalActual());
-  const [vistaPagos, setVistaPagos] = useState(false);
 
   useEffect(() => {
     if (user?.rol === 'Docente' && docenteInfo?.id) {
@@ -95,8 +118,16 @@ export default function HomeScreen() {
             const historialFusionado = Array.from(new Set([...locales, ...completadasEnBD]));
             setClasesCompletadas(historialFusionado);
           }
+
+          const resProyectos = await fetch(`${API_BASE_URL}/proyectos-titulacion`);
+          if (resProyectos.ok) {
+            const proyectosData = await resProyectos.json();
+            const listaProyectos = Array.isArray(proyectosData) ? proyectosData : proyectosData.data || [];
+            const asignados = listaProyectos.filter((p: any) => p.docente_asesor_id === docenteInfo.id);
+            setProyectosAsesoradosCount(asignados.length);
+          }
         } catch (e) {
-          console.error("Error sincronizando estado diario:", e);
+          console.error('Error sincronizando estado:', e);
         }
       };
 
@@ -111,6 +142,12 @@ export default function HomeScreen() {
     }
   }, [alumnoInfo]);
 
+  const verificarYNotificarVeda = () => {
+    if (isVedaElectoral) {
+      setMostrarModalNormativo(true);
+    }
+  };
+
   const handleLogin = async () => {
     if (!username.trim()) {
       Alert.alert('Aviso', 'Por favor ingresa tu matrícula o clave de usuario.');
@@ -119,39 +156,58 @@ export default function HomeScreen() {
     setLoading(true);
     try {
       const resUsers = await fetch(`${API_BASE_URL}/usuarios`);
-      if (!resUsers.ok) throw new Error('Error al conectar con el servidor.');
-      const usuarios = await resUsers.json();
-      const foundUser = usuarios.find((u: any) => u.username === username.trim() && u.activo);
+      if (!resUsers.ok) throw new Error(`Error en el servidor de usuarios (${resUsers.status}).`);
+      
+      const resData = await resUsers.json();
+      const listaUsuarios = Array.isArray(resData) ? resData : resData.data || [];
 
-      if (!foundUser) throw new Error('Credenciales no válidas o usuario inactivo.');
+      const inputBuscado = username.trim().toLowerCase();
+      const foundUser = listaUsuarios.find((u: any) => {
+        const userMatch = (u.username || '').toString().toLowerCase() === inputBuscado;
+        const estaActivo = u.activo == 1 || u.activo === true || u.activo === '1' || u.activo === undefined;
+        return userMatch && estaActivo;
+      });
 
-      if (foundUser.rol === 'Docente') {
+      if (!foundUser) {
+        throw new Error('Usuario no encontrado o inactivo en el sistema.');
+      }
+
+      const rol = (foundUser.rol || '').toString().trim().toLowerCase();
+
+      if (rol.includes('docente')) {
         const resDocentes = await fetch(`${API_BASE_URL}/docentes`);
-        if (!resDocentes.ok) throw new Error(`Error en el servidor (${resDocentes.status}).`);
+        if (!resDocentes.ok) throw new Error(`Error al consultar docentes (${resDocentes.status}).`);
 
         const docentes = await resDocentes.json();
         const listaDocentes = Array.isArray(docentes) ? docentes : docentes.data || [];
         const foundDocente = listaDocentes.find((d: any) => d.usuario_id === foundUser.id);
         
-        if (!foundDocente) throw new Error('No se encontraron detalles del docente.');
+        if (!foundDocente) throw new Error('No se encontraron datos asociados al docente.');
         
         setUser(foundUser);
         setDocenteInfo(foundDocente);
+        verificarYNotificarVeda();
 
-      } else if (foundUser.rol === 'Estudiante') {
+      } else if (rol.includes('estudiante') || rol.includes('alumno')) {
         const resAlumnos = await fetch(`${API_BASE_URL}/alumnos`);
-        if (!resAlumnos.ok) throw new Error(`Error en el servidor (${resAlumnos.status}).`);
+        if (!resAlumnos.ok) throw new Error(`Error al consultar alumnos (${resAlumnos.status}).`);
         
         const alumnos = await resAlumnos.json();
         const listaAlumnos = Array.isArray(alumnos) ? alumnos : alumnos.data || [];
         const foundAlumno = listaAlumnos.find((a: any) => a.usuario_id === foundUser.id);
         
-        if (!foundAlumno) throw new Error('No se encontraron detalles del alumno.');
+        if (!foundAlumno) throw new Error('No se encontraron datos asociados al alumno.');
         
         setUser(foundUser);
         setAlumnoInfo(foundAlumno);
+        verificarYNotificarVeda();
+
+      } else if (rol.includes('admin') || rol.includes('director') || rol.includes('control')) {
+        setUser(foundUser);
+        verificarYNotificarVeda();
+
       } else {
-        throw new Error('Rol no admitido en esta aplicación.');
+        throw new Error(`El rol "${foundUser.rol}" no tiene acceso configurado en esta app.`);
       }
     } catch (error: any) {
       Alert.alert('Error de Acceso', error.message);
@@ -169,7 +225,7 @@ export default function HomeScreen() {
       const lista = Array.isArray(responseData) ? responseData : responseData.data || [];
       setCargasDocente(lista.filter((c: any) => c.docente_id === docenteId));
     } catch (error) { 
-      console.error("Error en cargas:", error); 
+      console.error('Error en cargas:', error); 
     }
   };
 
@@ -181,7 +237,7 @@ export default function HomeScreen() {
       const lista = Array.isArray(responseData) ? responseData : responseData.data || [];
       setHorarioAlumno(lista.filter((c: any) => c.grupo_id === grupoId));
     } catch (error) {
-      console.error("Error en horario:", error);
+      console.error('Error en horario:', error);
     } finally {
       setLoading(false);
     }
@@ -255,37 +311,239 @@ export default function HomeScreen() {
     setClasesCompletadas([]);
     setVistaPagos(false);
     setVistaTitulacion(false);
+    setVistaAsesoriaDocente(false);
+    setVistaAdminTheme(false);
+    setMostrarModalNormativo(false);
+    setMenuLateralVisible(false);
+    setProyectosAsesoradosCount(0);
   };
 
-  // --- VISTA: LOGIN  ---
+  // Componente Modal de Notificación de Veda
+  const renderModalNormativo = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={mostrarModalNormativo}
+      onRequestClose={() => setMostrarModalNormativo(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalIconWrap}>
+            <Text style={{ fontSize: 32 }}>⚖️</Text>
+          </View>
+          <Text style={styles.modalTitle}>Aviso Importante</Text>
+          <Text style={styles.modalBody}>
+            Para poder cumplir con la normativa de la ley estatal y federal en materia electoral, este sistema modificará sus contenidos temporalmente.
+          </Text>
+          <TouchableOpacity
+            style={[styles.modalButton, { backgroundColor: colors.primary }]}
+            onPress={() => setMostrarModalNormativo(false)}
+          >
+            <Text style={styles.modalButtonText}>Entendido</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const rolNormalizado = (user?.rol || '').toString().toLowerCase();
+  const semestreActual = Number(horarioAlumno[0]?.grupo?.semestre || alumnoInfo?.semestre || 0);
+  const puedeAccederTitulacion = semestreActual === 6;
+  const tieneAsesorados = proyectosAsesoradosCount > 0;
+
+  // Componente Menú Lateral Desplegable
+  const renderMenuLateral = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={menuLateralVisible}
+      onRequestClose={() => setMenuLateralVisible(false)}
+    >
+      <View style={styles.drawerOverlay}>
+        <TouchableWithoutFeedback onPress={() => setMenuLateralVisible(false)}>
+          <View style={styles.drawerBackdrop} />
+        </TouchableWithoutFeedback>
+
+        <View style={[styles.drawerContent, { backgroundColor: colors.cardBg }]}>
+          {/* Encabezado del Menú */}
+          <View style={[styles.drawerHeader, { backgroundColor: colors.primary }]}>
+            <View style={styles.drawerAvatar}>
+              <Text style={{ fontSize: 24 }}>👤</Text>
+            </View>
+            <Text style={styles.drawerUserName}>
+              {alumnoInfo ? `${limpiarTextoPHP(alumnoInfo?.nombre)} ${limpiarTextoPHP(alumnoInfo?.apellido_paterno)}` : docenteInfo ? `Prof. ${limpiarTextoPHP(docenteInfo?.nombre)}` : user?.username}
+            </Text>
+            <Text style={styles.drawerUserRole}>{user?.rol}</Text>
+          </View>
+
+          {/* Opciones del Menú según el Rol */}
+          <ScrollView style={styles.drawerBody}>
+            {/* Opciones de Alumno */}
+            {(rolNormalizado.includes('estudiante') || rolNormalizado.includes('alumno')) && (
+              <>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setVistaPagos(false);
+                    setVistaTitulacion(false);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>📅</Text>
+                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Horario Escolar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setVistaTitulacion(false);
+                    setVistaPagos(true);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>💳</Text>
+                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Finanzas y Pagos</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    if (!puedeAccederTitulacion) {
+                      Alert.alert(
+                        'Módulo Bloqueado',
+                        `El módulo de titulación está disponible exclusivamente para alumnos inscritos en 6° semestre (Actualmente te encuentras en ${semestreActual > 0 ? semestreActual + '°' : 'semestre regular'}).`
+                      );
+                      return;
+                    }
+                    setVistaPagos(false);
+                    setVistaTitulacion(true);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>{puedeAccederTitulacion ? '🎓' : '🔒'}</Text>
+                  <Text style={[styles.drawerItemText, { color: puedeAccederTitulacion ? colors.textPrimary : '#94a3b8' }]}>
+                    Proyecto de Titulación
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Opciones de Docente */}
+            {rolNormalizado.includes('docente') && (
+              <>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setVistaAsesoriaDocente(false);
+                    setSelectedCarga(null);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>📋</Text>
+                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Pase de Lista y Clases</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    if (!tieneAsesorados) {
+                      Alert.alert(
+                        'Módulo Bloqueado',
+                        'Actualmente no tienes proyectos de titulación asignados como docente asesor.'
+                      );
+                      return;
+                    }
+                    setSelectedCarga(null);
+                    setVistaAsesoriaDocente(true);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>{tieneAsesorados ? '👨‍🏫' : '🔒'}</Text>
+                  <Text style={[styles.drawerItemText, { color: tieneAsesorados ? colors.textPrimary : '#94a3b8' }]}>
+                    Asesoría de Titulación
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Opciones de Administrador */}
+            {(rolNormalizado.includes('admin') || rolNormalizado.includes('director') || rolNormalizado.includes('control')) && (
+              <>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setVistaAdminTheme(false);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>🖥️</Text>
+                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Inicio Administrador</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setVistaAdminTheme(true);
+                    setMenuLateralVisible(false);
+                  }}
+                >
+                  <Text style={styles.drawerItemIcon}>🎨</Text>
+                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Configurar Veda & Tema</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </ScrollView>
+
+          {/* Botón Salir */}
+          <View style={[styles.drawerFooter, { borderTopColor: colors.border }]}>
+            <TouchableOpacity style={styles.drawerLogoutBtn} onPress={handleLogout}>
+              <Text style={styles.drawerLogoutText}>Cerrar Sesión</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // ============================================================
+  // 1. VISTA: LOGIN
+  // ============================================================
   if (!user) {
     return (
-      <SafeAreaView style={styles.loginBackground}>
+      <SafeAreaView style={[styles.loginBackground, { backgroundColor: colors.primaryLight }]}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.loginContainer}
         >
-          <View style={styles.modernCard}>
+          <View style={[styles.modernCard, { borderColor: colors.primary }]}>
             <View style={styles.brandContainer}>
-              <View style={styles.logoBadge}>
+              <View style={[styles.logoBadge, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
                 <Text style={styles.logoBadgeText}>🏛️</Text>
               </View>
-              <Text style={styles.brandTitle}>SUIE</Text>
-              <View style={styles.tagOrgullo}>
-                <Text style={styles.tagOrgulloText}>#OrgullosamenteCECyTE13</Text>
-              </View>
-              <Text style={styles.brandSubtitle}>
+              <Text style={[styles.brandTitle, { color: colors.primary }]}>SUIE</Text>
+              
+              {!isVedaElectoral ? (
+                <View style={[styles.tagOrgullo, { backgroundColor: colors.accentLight, borderColor: colors.accent }]}>
+                  <Text style={[styles.tagOrgulloText, { color: colors.accent }]}>#OrgullosamenteCECyTE13</Text>
+                </View>
+              ) : (
+                <View style={[styles.tagOrgullo, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
+                  <Text style={[styles.tagOrgulloText, { color: colors.primary }]}>#OrgullosamenteCECyTE13</Text>
+                </View>
+              )}
+
+              <Text style={[styles.brandSubtitle, { color: colors.textSecondary }]}>
                 Sistema Unificado de Integración Educativa
               </Text>
             </View>
 
             <View style={styles.formContainer}>
-              <Text style={styles.inputLabel}>Identificación Institucional</Text>
-              <View style={[styles.inputWrapper, inputFocused && styles.inputWrapperFocused]}>
+              <Text style={[styles.inputLabel, { color: colors.textPrimary }]}>Identificación Institucional</Text>
+              <View style={[styles.inputWrapper, inputFocused && { borderColor: colors.primary, backgroundColor: '#ffffff' }]}>
                 <Text style={styles.inputIcon}>👤</Text>
                 <TextInput
                   style={styles.modernInput}
-                  placeholder="Matrícula o Clave de Acceso"
+                  placeholder="Matrícula, Control o Usuario Admin"
                   placeholderTextColor="#9ca3af"
                   autoCapitalize="none"
                   value={username}
@@ -296,7 +554,7 @@ export default function HomeScreen() {
               </View>
 
               <TouchableOpacity 
-                style={[styles.btnLoginModern, loading && styles.btnDisabled]} 
+                style={[styles.btnLoginModern, { backgroundColor: colors.primary }, loading && styles.btnDisabled]} 
                 onPress={handleLogin} 
                 disabled={loading}
                 activeOpacity={0.8}
@@ -310,7 +568,9 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.loginFooter}>
-              <Text style={styles.footerNote}>CECyTE • EMSAD Educación de Calidad</Text>
+              <Text style={[styles.footerNote, { color: colors.wine }]}>
+                {isVedaElectoral ? 'CECyTE • EMSAD' : 'CECyTE • EMSAD Educación de Calidad'}
+              </Text>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -318,8 +578,55 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL ESTUDIANTE ---
-  if (user.rol === 'Estudiante') {
+  // ============================================================
+  // 2. VISTA: ADMINISTRADOR
+  // ============================================================
+  if (rolNormalizado.includes('admin') || rolNormalizado.includes('director') || rolNormalizado.includes('control')) {
+    if (vistaAdminTheme) {
+      return <AdminPanelTheme adminUser={user} onBack={() => setVistaAdminTheme(false)} />;
+    }
+
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+        {renderModalNormativo()}
+        {renderMenuLateral()}
+        <View style={styles.appHeader}>
+          <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+            <Text style={{ fontSize: 20 }}>☰</Text>
+          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[styles.headerTitleCenter, { color: colors.primary }]}>Panel Administrador</Text>
+            <Text style={styles.headerSubCenter}>Control Central</Text>
+          </View>
+          <TouchableOpacity 
+            style={[styles.btnLogoutModern, { backgroundColor: colors.wineLight, borderColor: colors.wine }]} 
+            onPress={handleLogout}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.btnLogoutText, { color: colors.wine }]}>Salir</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <Text style={[styles.sectionHeading, { color: colors.primary, marginBottom: 14 }]}>
+            Panel Central de Administración
+          </Text>
+
+          <View style={[styles.groupInfoCard, { backgroundColor: colors.cardBg, borderColor: colors.border, marginTop: 4 }]}>
+            <Text style={[styles.groupTitle, { color: colors.primary }]}>SUIE Core System</Text>
+            <Text style={[styles.groupSpecialty, { color: colors.textSecondary }]}>
+              Servidor activo: {API_BASE_URL}
+            </Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ============================================================
+  // 3. VISTA: ESTUDIANTE
+  // ============================================================
+  if (rolNormalizado.includes('estudiante') || rolNormalizado.includes('alumno')) {
     if (vistaPagos) {
       return <SubirPagos alumnoId={alumnoInfo?.id} onBack={() => setVistaPagos(false)} />;
     }
@@ -355,10 +662,10 @@ export default function HomeScreen() {
 
       const textoCompleto = `${item.horario || ''} ${item.dia || ''} ${item.descripcion || ''}`
         .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
 
-      const diaBuscadoSinAcento = diaActual.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const diaBuscadoSinAcento = diaActual.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
       const regexRango = /(lunes|martes|miercoles|jueves|viernes|lun|mar|mie|jue|vie)\s*(?:a|al|-)\s*(lunes|martes|miercoles|jueves|viernes|lun|mar|mie|jue|vie)/i;
       const matchRango = textoCompleto.match(regexRango);
@@ -380,85 +687,46 @@ export default function HomeScreen() {
       verificarPertenenciaAlDia(item, diaSeleccionado)
     );
 
-    const nombreLimpio = `${limpiarTextoPHP(alumnoInfo?.nombre)} ${limpiarTextoPHP(alumnoInfo?.apellido_paterno)}`;
-    const iniciales = `${(alumnoInfo?.nombre || 'E')[0]}${(alumnoInfo?.apellido_paterno || 'S')[0]}`.toUpperCase();
-
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+        {renderModalNormativo()}
+        {renderMenuLateral()}
         <View style={styles.appHeader}>
-          <View style={styles.userInfoBlock}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>{iniciales}</Text>
-            </View>
-            <View>
-              <Text style={styles.userName}>{nombreLimpio}</Text>
-              <View style={styles.roleTag}>
-                <Text style={styles.roleTagText}>🎓 Alumno CECyTE</Text>
-              </View>
-            </View>
+          <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+            <Text style={{ fontSize: 20 }}>☰</Text>
+          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[styles.headerTitleCenter, { color: colors.primary }]}>Portal Estudiante</Text>
+            <Text style={styles.headerSubCenter}>CECyTE 13</Text>
           </View>
-          <TouchableOpacity style={styles.btnLogoutModern} onPress={handleLogout} activeOpacity={0.8}>
-            <Text style={styles.btnLogoutText}>Salir</Text>
+          <TouchableOpacity style={[styles.btnLogoutModern, { backgroundColor: colors.wineLight, borderColor: colors.wine }]} onPress={handleLogout} activeOpacity={0.8}>
+            <Text style={[styles.btnLogoutText, { color: colors.wine }]}>Salir</Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Banner Financiero con Acento Naranja */}
-          <TouchableOpacity 
-            style={styles.financeBanner}
-            onPress={() => setVistaPagos(true)}
-            activeOpacity={0.9}
-          >
-            <View style={styles.financeIconWrapper}>
-              <Text style={{ fontSize: 24 }}>💳</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.financeBannerTitle}>Control Financiero y Pagos</Text>
-              <Text style={styles.financeBannerSub}>Consulta tus órdenes y sube tus comprobantes</Text>
-            </View>
-            <View style={styles.arrowCircle}>
-              <Text style={styles.arrowText}>→</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[styles.financeBanner, { backgroundColor: '#841B44', borderColor: '#651333', marginTop: SPACING.two }]}
-            onPress={() => setVistaTitulacion(true)}
-            activeOpacity={0.9}
-          >
-            <View style={styles.financeIconWrapper}>
-              <Text style={{ fontSize: 24 }}>🎓</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.financeBannerTitle}>Proyecto de Titulación</Text>
-              <Text style={styles.financeBannerSub}>Consulta estatus o registra tu proyecto</Text>
-            </View>
-            <View style={styles.arrowCircle}>
-              <Text style={[styles.arrowText, { color: '#841B44' }]}>→</Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* Tarjeta de Especialidad */}
-          <View style={styles.groupInfoCard}>
+          <View style={[styles.groupInfoCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
             <View style={styles.groupHeaderRow}>
               <View>
                 <Text style={styles.groupMetaLabel}>GRUPO ASIGNADO</Text>
-                <Text style={styles.groupTitle}>
+                <Text style={[styles.groupTitle, { color: colors.primary }]}>
                   {horarioAlumno[0]?.grupo?.semestre ? `${horarioAlumno[0]?.grupo?.semestre}° "${horarioAlumno[0]?.grupo?.grupo}"` : 'Grupo Asignado'}
                 </Text>
               </View>
-              <View style={styles.turnoBadge}>
-                <Text style={styles.turnoBadgeText}>{horarioAlumno[0]?.grupo?.turno || 'Matutino'}</Text>
+              <View style={[styles.turnoBadge, { backgroundColor: colors.accentLight }]}>
+                <Text style={[styles.turnoBadgeText, { color: colors.accent }]}>{horarioAlumno[0]?.grupo?.turno || 'Matutino'}</Text>
               </View>
             </View>
-            <Text style={styles.groupSpecialty}>
-              🌿 {horarioAlumno[0]?.grupo?.especialidad || 'Cargando especialidad...'}
+            <Text style={[styles.groupSpecialty, { color: colors.wine }]}>
+              📚 {horarioAlumno[0]?.grupo?.especialidad || 'Cargando especialidad...'}
             </Text>
           </View>
 
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionHeading}>Horario Escolar Semanal</Text>
-            <Text style={styles.sectionCounter}>{clasesDelDia.length} Materias</Text>
+            <Text style={[styles.sectionHeading, { color: colors.primary }]}>Horario Escolar Semanal</Text>
+            <Text style={[styles.sectionCounter, { color: colors.accent, backgroundColor: colors.accentLight, borderColor: colors.accent }]}>
+              {clasesDelDia.length} Materias
+            </Text>
           </View>
 
           {/* Selector de Días */}
@@ -469,37 +737,40 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   key={dia}
                   onPress={() => setDiaSeleccionado(dia)}
-                  style={[styles.dayPill, active && styles.dayPillActive]}
+                  style={[
+                    styles.dayPill, 
+                    { backgroundColor: colors.cardBg, borderColor: colors.border },
+                    active && { backgroundColor: colors.primary, borderColor: colors.primary }
+                  ]}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.dayPillText, active && styles.dayPillTextActive]}>{dia}</Text>
+                  <Text style={[styles.dayPillText, { color: colors.textSecondary }, active && { color: '#ffffff' }]}>{dia}</Text>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
 
-          {/* Listado de Asignaturas */}
           {loading ? (
             <View style={styles.centerLoading}>
-              <ActivityIndicator size="large" color="#0F7F41" />
-              <Text style={styles.loadingText}>Cargando materias...</Text>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.primary }]}>Cargando materias...</Text>
             </View>
           ) : clasesDelDia.length === 0 ? (
-            <View style={styles.emptyContainer}>
+            <View style={[styles.emptyContainer, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
               <Text style={{ fontSize: 36, marginBottom: 8 }}>☕</Text>
-              <Text style={styles.emptyTitle}>Sin clases programadas</Text>
+              <Text style={[styles.emptyTitle, { color: colors.primary }]}>Sin clases programadas</Text>
               <Text style={styles.emptySubtitle}>No tienes materias registradas para el {diaSeleccionado}.</Text>
             </View>
           ) : (
             clasesDelDia.map((item) => (
-              <View key={item.id} style={styles.scheduleCard}>
-                <View style={styles.scheduleAccentBar} />
+              <View key={item.id} style={[styles.scheduleCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+                <View style={[styles.scheduleAccentBar, { backgroundColor: colors.primary }]} />
                 <View style={styles.scheduleBody}>
                   <View style={styles.scheduleTopRow}>
-                    <Text style={styles.subjectName}>{item.materia?.nombre}</Text>
+                    <Text style={[styles.subjectName, { color: colors.textPrimary }]}>{item.materia?.nombre}</Text>
                     {item.materia?.clave && (
-                      <View style={styles.codeTag}>
-                        <Text style={styles.codeTagText}>{item.materia?.clave}</Text>
+                      <View style={[styles.codeTag, { backgroundColor: colors.wineLight }]}>
+                        <Text style={[styles.codeTagText, { color: colors.wine }]}>{item.materia?.clave}</Text>
                       </View>
                     )}
                   </View>
@@ -515,11 +786,11 @@ export default function HomeScreen() {
                     <View style={styles.scheduleBottomRow}>
                       <View style={styles.detailItem}>
                         <Text style={styles.detailIcon}>📍</Text>
-                        <Text style={styles.detailText}>Aula: <Text style={styles.detailHighlight}>{item.aula || 'Por definir'}</Text></Text>
+                        <Text style={styles.detailText}>Aula: <Text style={[styles.detailHighlight, { color: colors.primary }]}>{item.aula || 'Por definir'}</Text></Text>
                       </View>
 
-                      <View style={styles.timeTag}>
-                        <Text style={styles.timeTagText}>⏰ {item.horario || 'Por definir'}</Text>
+                      <View style={[styles.timeTag, { backgroundColor: colors.accentLight }]}>
+                        <Text style={[styles.timeTagText, { color: colors.accent }]}>⏰ {item.horario || 'Por definir'}</Text>
                       </View>
                     </View>
                   </View>
@@ -532,61 +803,44 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DOCENTE: FORMULARIO DE ASISTENCIA ---
+  // ============================================================
+  // 4. VISTA: DOCENTE
+  // ============================================================
   if (selectedCarga) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+        {renderModalNormativo()}
         <View style={styles.appHeader}>
-          <TouchableOpacity style={styles.btnBack} onPress={() => setSelectedCarga(null)}>
-            <Text style={styles.btnBackText}>← Volver</Text>
+          <TouchableOpacity style={[styles.btnBack, { backgroundColor: colors.primaryLight }]} onPress={() => setSelectedCarga(null)}>
+            <Text style={[styles.btnBackText, { color: colors.primary }]}>← Volver</Text>
           </TouchableOpacity>
           <View style={{ alignItems: 'center' }}>
-            <Text style={styles.headerTitleCenter}>Pase de Lista</Text>
+            <Text style={[styles.headerTitleCenter, { color: colors.primary }]}>Pase de Lista</Text>
             <Text style={styles.headerSubCenter}>📅 {fecha}</Text>
           </View>
           <View style={{ width: 60 }} />
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.classInfoCard}>
+          <View style={[styles.classInfoCard, { backgroundColor: colors.cardBg, borderColor: colors.primary }]}>
             <View style={styles.classBadgeRow}>
-              <View style={styles.classTag}>
-                <Text style={styles.classTagText}>
+              <View style={[styles.classTag, { backgroundColor: colors.primaryLight }]}>
+                <Text style={[styles.classTagText, { color: colors.primary }]}>
                   Grupo {selectedCarga.grupo?.semestre}° "{selectedCarga.grupo?.grupo}"
                 </Text>
               </View>
-              <Text style={styles.classTurnoText}>{selectedCarga.grupo?.turno || 'Matutino'}</Text>
+              <Text style={[styles.classTurnoText, { color: colors.accent }]}>{selectedCarga.grupo?.turno || 'Matutino'}</Text>
             </View>
-            <Text style={styles.classSubjectTitle}>{selectedCarga.materia?.nombre}</Text>
+            <Text style={[styles.classSubjectTitle, { color: colors.primary }]}>{selectedCarga.materia?.nombre}</Text>
             <Text style={styles.classMetaInfo}>
               📍 Aula: {selectedCarga.aula || 'Por asignar'} • ⏰ {selectedCarga.horario || 'Horario regular'}
             </Text>
           </View>
 
-          {/* Leyenda de Asistencia */}
-          <View style={styles.legendContainer}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#0F7F41' }]} />
-              <Text style={styles.legendLabel}>Asistencia</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#841B44' }]} />
-              <Text style={styles.legendLabel}>Falta</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#E66711' }]} />
-              <Text style={styles.legendLabel}>Justif.</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#3b82f6' }]} />
-              <Text style={styles.legendLabel}>Retardo</Text>
-            </View>
-          </View>
-
           {loading ? (
             <View style={styles.centerLoading}>
-              <ActivityIndicator size="large" color="#0F7F41" />
-              <Text style={styles.loadingText}>Cargando lista de alumnos...</Text>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.primary }]}>Cargando lista de alumnos...</Text>
             </View>
           ) : (
             alumnosGrupo.map((alumno, index) => {
@@ -594,24 +848,24 @@ export default function HomeScreen() {
               const nombreAlumno = `${limpiarTextoPHP(alumno.nombre)} ${limpiarTextoPHP(alumno.apellido_paterno)}`;
               
               return (
-                <View key={alumno.id} style={styles.studentAttendanceCard}>
+                <View key={alumno.id} style={[styles.studentAttendanceCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
                   <View style={styles.studentInfoRow}>
-                    <View style={styles.studentAvatar}>
-                      <Text style={styles.studentAvatarText}>{inicialesAlumno}</Text>
+                    <View style={[styles.studentAvatar, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
+                      <Text style={[styles.studentAvatarText, { color: colors.primary }]}>{inicialesAlumno}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.studentName}>{index + 1}. {nombreAlumno}</Text>
+                      <Text style={[styles.studentName, { color: colors.textPrimary }]}>{index + 1}. {nombreAlumno}</Text>
                       {alumno.nombre_tutor && (
-                        <Text style={styles.studentTutor}>Tutor: {limpiarTextoPHP(alumno.nombre_tutor)}</Text>
+                        <Text style={[styles.studentTutor, { color: colors.wine }]}>Tutor: {limpiarTextoPHP(alumno.nombre_tutor)}</Text>
                       )}
                     </View>
                   </View>
 
                   <View style={styles.attendanceActionRow}>
                     {[
-                      { key: 'Asistencia', label: 'A', activeColor: '#0F7F41' },
-                      { key: 'Falta', label: 'F', activeColor: '#841B44' },
-                      { key: 'Justificado', label: 'J', activeColor: '#E66711' },
+                      { key: 'Asistencia', label: 'A', activeColor: colors.primary },
+                      { key: 'Falta', label: 'F', activeColor: colors.wine },
+                      { key: 'Justificado', label: 'J', activeColor: colors.accent },
                       { key: 'Retardo', label: 'R', activeColor: '#3b82f6' },
                     ].map((estado) => {
                       const isActive = asistencias[alumno.id] === estado.key;
@@ -640,7 +894,7 @@ export default function HomeScreen() {
 
         <View style={styles.footerSubmitContainer}>
           <TouchableOpacity 
-            style={[styles.btnSaveAttendance, loading && styles.btnDisabled]} 
+            style={[styles.btnSaveAttendance, { backgroundColor: colors.primary }, loading && styles.btnDisabled]} 
             onPress={handleGuardarAsistencia} 
             disabled={loading}
             activeOpacity={0.85}
@@ -656,56 +910,65 @@ export default function HomeScreen() {
     );
   }
 
-  // --- PORTAL DOCENTE: DASHBOARD ---
+  if (vistaAsesoriaDocente) {
+    return (
+      <DocenteAsesoriaView
+        docenteId={docenteInfo?.id}
+        usuarioId={user?.id}
+        onBack={() => setVistaAsesoriaDocente(false)}
+      />
+    );
+  }
+
   const clasesRestantesCount = cargasDocente.length - clasesCompletadas.length;
-  const docenteNombre = docenteInfo?.nombre ? limpiarTextoPHP(docenteInfo.nombre) : 'Docente';
-  const docenteInicial = (docenteNombre || 'D')[0].toUpperCase();
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      {renderModalNormativo()}
+      {renderMenuLateral()}
       <View style={styles.appHeader}>
-        <View style={styles.userInfoBlock}>
-          <View style={[styles.avatarCircle, { backgroundColor: '#E7F3EC' }]}>
-            <Text style={[styles.avatarText, { color: '#0F7F41' }]}>{docenteInicial}</Text>
-          </View>
-          <View>
-            <Text style={styles.userName}>Prof. {docenteNombre}</Text>
-            <Text style={styles.userSubtitle}>📅 {fecha}</Text>
-          </View>
+        <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+          <Text style={{ fontSize: 20 }}>☰</Text>
+        </TouchableOpacity>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={[styles.headerTitleCenter, { color: colors.primary }]}>Portal Docente</Text>
+          <Text style={styles.headerSubCenter}>📅 {fecha}</Text>
         </View>
-        <TouchableOpacity style={styles.btnLogoutModern} onPress={handleLogout} activeOpacity={0.8}>
-          <Text style={styles.btnLogoutText}>Salir</Text>
+        <TouchableOpacity style={[styles.btnLogoutModern, { backgroundColor: colors.wineLight, borderColor: colors.wine }]} onPress={handleLogout} activeOpacity={0.8}>
+          <Text style={[styles.btnLogoutText, { color: colors.wine }]}>Salir</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionHeading}>Resumen del Día</Text>
+        <Text style={[styles.sectionHeading, { color: colors.primary }]}>Resumen del Día</Text>
 
         <View style={styles.metricsContainer}>
-          <View style={styles.metricCardSuccess}>
+          <View style={[styles.metricCardSuccess, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
             <View style={styles.metricIconWrapSuccess}>
-              <Text style={{ fontSize: 18, color: '#0F7F41' }}>✓</Text>
+              <Text style={{ fontSize: 18, color: colors.primary }}>✓</Text>
             </View>
             <View>
-              <Text style={styles.metricNumberSuccess}>{clasesCompletadas.length}</Text>
+              <Text style={[styles.metricNumberSuccess, { color: colors.primary }]}>{clasesCompletadas.length}</Text>
               <Text style={styles.metricLabelText}>Listas Tomadas</Text>
             </View>
           </View>
 
-          <View style={styles.metricCardWarning}>
+          <View style={[styles.metricCardWarning, { backgroundColor: colors.accentLight, borderColor: colors.accent }]}>
             <View style={styles.metricIconWrapWarning}>
-              <Text style={{ fontSize: 18, color: '#E66711' }}>⏳</Text>
+              <Text style={{ fontSize: 18, color: colors.accent }}>⏳</Text>
             </View>
             <View>
-              <Text style={styles.metricNumberWarning}>{clasesRestantesCount}</Text>
+              <Text style={[styles.metricNumberWarning, { color: colors.accent }]}>{clasesRestantesCount}</Text>
               <Text style={styles.metricLabelText}>Clases Pendientes</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionHeading}>Tus Clases Asignadas</Text>
-          <Text style={styles.sectionCounter}>{cargasDocente.length} Asignaciones</Text>
+          <Text style={[styles.sectionHeading, { color: colors.primary }]}>Tus Clases Asignadas</Text>
+          <Text style={[styles.sectionCounter, { color: colors.accent, backgroundColor: colors.accentLight, borderColor: colors.accent }]}>
+            {cargasDocente.length} Asignaciones
+          </Text>
         </View>
 
         {cargasDocente.map((carga) => {
@@ -715,36 +978,37 @@ export default function HomeScreen() {
               key={carga.id} 
               style={[
                 styles.docenteCargaCard, 
-                yaCompletada ? styles.docenteCargaCardCompleted : styles.docenteCargaCardPending
+                { backgroundColor: colors.cardBg, borderColor: colors.border },
+                yaCompletada ? [styles.docenteCargaCardCompleted, { borderLeftColor: colors.primary }] : [styles.docenteCargaCardPending, { borderLeftColor: colors.accent }]
               ]} 
               onPress={() => handleSelectCarga(carga)}
               activeOpacity={yaCompletada ? 0.9 : 0.7}
             >
               <View style={styles.docenteCardHeader}>
-                <View style={styles.groupBadgeDocente}>
-                  <Text style={styles.groupBadgeDocenteText}>
+                <View style={[styles.groupBadgeDocente, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={[styles.groupBadgeDocenteText, { color: colors.primary }]}>
                     Grupo {carga.grupo?.semestre}° "{carga.grupo?.grupo}"
                   </Text>
                 </View>
 
                 {yaCompletada ? (
-                  <View style={styles.badgeDone}>
-                    <Text style={styles.badgeDoneText}>✓ Completado</Text>
+                  <View style={[styles.badgeDone, { backgroundColor: colors.primaryLight }]}>
+                    <Text style={[styles.badgeDoneText, { color: colors.primary }]}>✓ Completado</Text>
                   </View>
                 ) : (
-                  <View style={styles.badgePending}>
-                    <Text style={styles.badgePendingText}>⚠️ Pasar Lista</Text>
+                  <View style={[styles.badgePending, { backgroundColor: colors.accentLight }]}>
+                    <Text style={[styles.badgePendingText, { color: colors.accent }]}>⚠️ Pasar Lista</Text>
                   </View>
                 )}
               </View>
 
-              <Text style={[styles.docenteSubjectTitle, yaCompletada && { color: '#64748b' }]}>
+              <Text style={[styles.docenteSubjectTitle, yaCompletada && { color: colors.textSecondary }]}>
                 {carga.materia?.nombre}
               </Text>
               
               <View style={styles.docenteMetaRow}>
                 <Text style={styles.docenteMetaText}>📍 Aula: {carga.aula || 'Por asignar'}</Text>
-                <Text style={[styles.docenteTimeText, yaCompletada && { color: '#94a3b8' }]}>
+                <Text style={[styles.docenteTimeText, { color: colors.accent }, yaCompletada && { color: '#94a3b8' }]}>
                   ⏰ {carga.horario || 'Regular'}
                 </Text>
               </View>
@@ -756,19 +1020,17 @@ export default function HomeScreen() {
   );
 }
 
+export default function HomeScreen() {
+  return (
+    <ThemeProvider>
+      <MainApp />
+    </ThemeProvider>
+  );
+}
+
 const styles = StyleSheet.create({
-  safeArea: { 
-    flex: 1, 
-    backgroundColor: '#f8fafc' 
-  },
-  
-  // ==========================================
-  // ESTILOS DE AUTENTICACIÓN (LOGIN)
-  // ==========================================
-  loginBackground: {
-    flex: 1,
-    backgroundColor: '#E7F3EC', // Tinte suave Verde Bandera
-  },
+  safeArea: { flex: 1 },
+  loginBackground: { flex: 1 },
   loginContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -783,72 +1045,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.five,
     paddingVertical: 32,
     borderWidth: 2,
-    borderColor: '#0F7F41', // Borde Verde Bandera
     ...(Platform.OS === 'web'
-      ? { boxShadow: '0px 10px 25px rgba(15, 127, 65, 0.12)' }
+      ? { boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.08)' }
       : {
           elevation: 6,
-          shadowColor: '#0F7F41',
+          shadowColor: '#000',
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.12,
           shadowRadius: 12,
         }),
   },
-  brandContainer: {
-    alignItems: 'center',
-    marginBottom: SPACING.five,
-  },
+  brandContainer: { alignItems: 'center', marginBottom: SPACING.five },
   logoBadge: {
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: '#E7F3EC',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: SPACING.two,
     borderWidth: 2.5,
-    borderColor: '#0F7F41',
   },
-  logoBadgeText: {
-    fontSize: 34,
-  },
-  brandTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#0F7F41', // Verde Bandera
-    letterSpacing: 1.5,
-  },
+  logoBadgeText: { fontSize: 34 },
+  brandTitle: { fontSize: 28, fontWeight: '900', letterSpacing: 1.5 },
   tagOrgullo: {
-    backgroundColor: '#FDEEE4',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 20,
     marginTop: 6,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#E66711',
   },
-  tagOrgulloText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#E66711', // Naranja Institucional
-    letterSpacing: 0.5,
-  },
-  brandSubtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  formContainer: {
-    width: '100%',
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1e293b',
-    marginBottom: 8,
-  },
+  tagOrgulloText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  brandSubtitle: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  formContainer: { width: '100%' },
+  inputLabel: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -860,47 +1090,17 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.four,
     height: 52,
   },
-  inputWrapperFocused: {
-    borderColor: '#0F7F41',
-    backgroundColor: '#ffffff',
-  },
-  inputIcon: {
-    fontSize: 16,
-    marginRight: 10,
-  },
-  modernInput: {
-    flex: 1,
-    height: '100%',
-    color: '#1e293b',
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  inputIcon: { fontSize: 16, marginRight: 10 },
+  modernInput: { flex: 1, height: '100%', color: '#1e293b', fontSize: 15, fontWeight: '500' },
   btnLoginModern: {
     height: 52,
-    backgroundColor: '#0F7F41', // Verde Bandera
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 4,
-    ...(Platform.OS === 'web'
-      ? { boxShadow: '0px 4px 12px rgba(15, 127, 65, 0.3)' }
-      : {
-          elevation: 3,
-          shadowColor: '#0F7F41',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 6,
-        }),
   },
-  btnDisabled: {
-    opacity: 0.7,
-  },
-  btnLoginText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+  btnDisabled: { opacity: 0.7 },
+  btnLoginText: { color: '#ffffff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   loginFooter: {
     marginTop: SPACING.five,
     borderTopWidth: 1,
@@ -908,15 +1108,8 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.three,
     alignItems: 'center',
   },
-  footerNote: {
-    fontSize: 11,
-    color: '#841B44', // Vino Institucional
-    fontWeight: '700',
-  },
+  footerNote: { fontSize: 11, fontWeight: '700' },
 
-  // ==========================================
-  // CABECERAS Y NAVEGACIÓN GLOBAL
-  // ==========================================
   appHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -927,86 +1120,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#edf2f7',
   },
-  userInfoBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  avatarCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#E7F3EC',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#0F7F41',
-  },
-  avatarText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
-  userName: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#1a202c',
-  },
-  userSubtitle: {
-    fontSize: 12,
-    color: '#0F7F41',
-    fontWeight: '600',
-  },
-  roleTag: {
-    backgroundColor: '#FDEEE4',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-    marginTop: 2,
-  },
-  roleTagText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#E66711',
-  },
-  btnLogoutModern: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    backgroundColor: '#F5E8ED',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#841B44',
-  },
-  btnLogoutText: {
-    color: '#841B44', // Vino
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  btnBack: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+  btnMenuDrawer: {
+    padding: 6,
     borderRadius: 8,
-    backgroundColor: '#E7F3EC',
+    backgroundColor: '#f1f5f9',
   },
-  btnBackText: {
-    color: '#0F7F41',
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  headerTitleCenter: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
-  headerSubCenter: {
-    fontSize: 11,
-    color: '#64748b',
-  },
+  btnLogoutModern: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
+  btnLogoutText: { fontSize: 12, fontWeight: '800' },
+  btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
+  btnBackText: { fontWeight: '800', fontSize: 13 },
+  headerTitleCenter: { fontSize: 16, fontWeight: '800' },
+  headerSubCenter: { fontSize: 11, color: '#64748b' },
 
-  // ==========================================
-  // CONTENEDORES Y SCROLL
-  // ==========================================
   scrollContent: {
     padding: SPACING.four,
     maxWidth: MAX_CONTENT_WIDTH,
@@ -1014,11 +1139,7 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingBottom: 40,
   },
-  sectionHeading: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
+  sectionHeading: { fontSize: 17, fontWeight: '800' },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1026,558 +1147,235 @@ const styles = StyleSheet.create({
     marginTop: SPACING.four,
     marginBottom: SPACING.two,
   },
-  sectionCounter: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#E66711',
-    backgroundColor: '#FDEEE4',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E66711',
-  },
+  sectionCounter: { fontSize: 12, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1 },
 
-  // ==========================================
-  // VISTA ESTUDIANTE: CARDS & HORARIOS
-  // ==========================================
-  financeBanner: {
-    flexDirection: 'row',
+  groupInfoCard: { padding: 16, borderRadius: 18, borderWidth: 1, marginTop: SPACING.three },
+  groupHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  groupMetaLabel: { fontSize: 10, fontWeight: '800', color: '#64748b', letterSpacing: 0.8 },
+  groupTitle: { fontSize: 18, fontWeight: '900', marginTop: 2 },
+  turnoBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  turnoBadgeText: { fontSize: 11, fontWeight: '800' },
+  groupSpecialty: { fontSize: 13, fontWeight: '700', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+
+  daySelectorScroll: { flexDirection: 'row', marginBottom: SPACING.three },
+  dayPill: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, marginRight: 8, borderWidth: 1.5 },
+  dayPillText: { fontSize: 13, fontWeight: '700' },
+
+  scheduleCard: { flexDirection: 'row', borderRadius: 16, borderWidth: 1, marginBottom: 10, overflow: 'hidden' },
+  scheduleAccentBar: { width: 6 },
+  scheduleBody: { flex: 1, padding: 14 },
+  scheduleTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  subjectName: { fontSize: 15, fontWeight: '800', flex: 1 },
+  codeTag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  codeTagText: { fontSize: 11, fontWeight: '800' },
+  scheduleDetails: { marginTop: 8, gap: 6 },
+  detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  detailIcon: { fontSize: 13 },
+  detailText: { fontSize: 12, color: '#64748b', fontWeight: '500' },
+  detailHighlight: { fontWeight: '700' },
+  scheduleBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f8fafc' },
+  timeTag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  timeTagText: { fontSize: 11, fontWeight: '800' },
+
+  metricsContainer: { flexDirection: 'row', gap: 12, marginTop: SPACING.two },
+  metricCardSuccess: { flex: 1, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, padding: 14, borderRadius: 16, gap: 10 },
+  metricIconWrapSuccess: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#ffffff', justifyContent: 'center', alignItems: 'center' },
+  metricNumberSuccess: { fontSize: 20, fontWeight: '900' },
+  metricCardWarning: { flex: 1, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, padding: 14, borderRadius: 16, gap: 10 },
+  metricIconWrapWarning: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#ffffff', justifyContent: 'center', alignItems: 'center' },
+  metricNumberWarning: { fontSize: 20, fontWeight: '900' },
+  metricLabelText: { fontSize: 11, fontWeight: '700', color: '#475569' },
+
+  docenteCargaCard: { borderRadius: 16, padding: 16, borderWidth: 1, marginBottom: 10 },
+  docenteCargaCardPending: { borderLeftWidth: 5 },
+  docenteCargaCardCompleted: { borderLeftWidth: 5, opacity: 0.75 },
+  docenteCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  groupBadgeDocente: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  groupBadgeDocenteText: { fontSize: 11, fontWeight: '800' },
+  badgeDone: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  badgeDoneText: { fontSize: 11, fontWeight: '800' },
+  badgePending: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  badgePendingText: { fontSize: 11, fontWeight: '800' },
+  docenteSubjectTitle: { fontSize: 16, fontWeight: '800', color: '#1e293b', marginTop: 10 },
+  docenteMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f8fafc' },
+  docenteMetaText: { fontSize: 12, color: '#64748b', fontWeight: '500' },
+  docenteTimeText: { fontSize: 12, fontWeight: '800' },
+
+  classInfoCard: { borderRadius: 18, padding: 16, borderWidth: 1.5, marginBottom: SPACING.three },
+  classBadgeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  classTag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  classTagText: { fontSize: 12, fontWeight: '800' },
+  classTurnoText: { fontSize: 12, fontWeight: '700' },
+  classSubjectTitle: { fontSize: 17, fontWeight: '900', marginTop: 8 },
+  classMetaInfo: { fontSize: 12, color: '#64748b', marginTop: 4, fontWeight: '500' },
+
+  studentAttendanceCard: { borderRadius: 16, padding: 12, borderWidth: 1, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  studentInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  studentAvatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  studentAvatarText: { fontSize: 12, fontWeight: '800' },
+  studentName: { fontSize: 14, fontWeight: '800' },
+  studentTutor: { fontSize: 11, marginTop: 1 },
+  attendanceActionRow: { flexDirection: 'row', gap: 6 },
+  chipAttendance: { width: 34, height: 34, borderRadius: 10, borderWidth: 1.5, borderColor: '#cbd5e1', justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff' },
+  chipAttendanceText: { fontSize: 13, fontWeight: '800', color: '#64748b' },
+  chipAttendanceTextActive: { color: '#ffffff' },
+  footerSubmitContainer: { padding: SPACING.four, backgroundColor: '#ffffff', borderTopWidth: 1, borderTopColor: '#edf2f7' },
+  btnSaveAttendance: { height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  btnSaveAttendanceText: { color: '#ffffff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
+
+  emptyContainer: { padding: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center' },
+  emptyTitle: { fontSize: 15, fontWeight: '800' },
+  emptySubtitle: { fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 4 },
+  centerLoading: { padding: 40, alignItems: 'center' },
+  loadingText: { fontSize: 13, marginTop: 10, fontWeight: '600' },
+
+  // Estilos del Modal Normativo
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#E66711', // Naranja Institucional
-    padding: 16,
-    borderRadius: 18,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#c55309',
+    padding: SPACING.four,
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    padding: 24,
+    maxWidth: 380,
+    width: '100%',
+    alignItems: 'center',
     ...(Platform.OS === 'web'
-      ? { boxShadow: '0px 6px 16px rgba(230, 103, 17, 0.25)' }
+      ? { boxShadow: '0px 10px 30px rgba(0, 0, 0, 0.25)' }
       : {
-          elevation: 4,
-          shadowColor: '#E66711',
-          shadowOffset: { width: 0, height: 4 },
+          elevation: 10,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 6 },
           shadowOpacity: 0.25,
-          shadowRadius: 8,
+          shadowRadius: 10,
         }),
   },
-  financeIconWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  modalIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f1f5f9',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 14,
   },
-  financeBannerTitle: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  financeBannerSub: {
-    color: '#fff',
-    opacity: 0.9,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  arrowCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  arrowText: {
-    color: '#E66711',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  groupInfoCard: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginTop: SPACING.three,
-  },
-  groupHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  groupMetaLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#64748b',
-    letterSpacing: 0.8,
-  },
-  groupTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#0F7F41',
-    marginTop: 2,
-  },
-  turnoBadge: {
-    backgroundColor: '#FDEEE4',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  turnoBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#E66711',
-  },
-  groupSpecialty: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#841B44',
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-  },
-
-  // Selector de Días
-  daySelectorScroll: {
-    flexDirection: 'row',
-    marginBottom: SPACING.three,
-  },
-  dayPill: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: '#ffffff',
-    marginRight: 8,
-    borderWidth: 1.5,
-    borderColor: '#e2e8f0',
-  },
-  dayPillActive: {
-    backgroundColor: '#0F7F41', // Verde Bandera Activo
-    borderColor: '#0F7F41',
-  },
-  dayPillText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#64748b',
-  },
-  dayPillTextActive: {
-    color: '#ffffff',
-  },
-
-  // Tarjetas de Horario
-  scheduleCard: {
-    flexDirection: 'row',
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  scheduleAccentBar: {
-    width: 6,
-    backgroundColor: '#0F7F41', // Verde
-  },
-  scheduleBody: {
-    flex: 1,
-    padding: 14,
-  },
-  scheduleTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  subjectName: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#1e293b',
-    flex: 1,
-  },
-  codeTag: {
-    backgroundColor: '#F5E8ED',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  codeTagText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#841B44', // Clave en Guinda
-  },
-  scheduleDetails: {
-    marginTop: 8,
-    gap: 6,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  detailIcon: {
-    fontSize: 13,
-  },
-  detailText: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  detailHighlight: {
-    color: '#0F7F41',
-    fontWeight: '700',
-  },
-  scheduleBottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 4,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f8fafc',
-  },
-  timeTag: {
-    backgroundColor: '#FDEEE4',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  timeTagText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#E66711', // Horario en Naranja
-  },
-
-  // ==========================================
-  // VISTA DOCENTE: DASHBOARD & PASE DE LISTA
-  // ==========================================
-  metricsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: SPACING.two,
-  },
-  metricCardSuccess: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E7F3EC',
-    borderWidth: 1.5,
-    borderColor: '#0F7F41',
-    padding: 14,
-    borderRadius: 16,
-    gap: 10,
-  },
-  metricIconWrapSuccess: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  metricNumberSuccess: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#0F7F41',
-  },
-  metricCardWarning: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FDEEE4',
-    borderWidth: 1.5,
-    borderColor: '#E66711',
-    padding: 14,
-    borderRadius: 16,
-    gap: 10,
-  },
-  metricIconWrapWarning: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  metricNumberWarning: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#E66711',
-  },
-  metricLabelText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#475569',
-  },
-
-  docenteCargaCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 10,
-  },
-  docenteCargaCardPending: {
-    borderLeftWidth: 5,
-    borderLeftColor: '#E66711',
-  },
-  docenteCargaCardCompleted: {
-    borderLeftWidth: 5,
-    borderLeftColor: '#0F7F41',
-    opacity: 0.75,
-  },
-  docenteCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  groupBadgeDocente: {
-    backgroundColor: '#E7F3EC',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  groupBadgeDocenteText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
-  badgeDone: {
-    backgroundColor: '#E7F3EC',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  badgeDoneText: {
-    color: '#0F7F41',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  badgePending: {
-    backgroundColor: '#FDEEE4',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  badgePendingText: {
-    color: '#E66711',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  docenteSubjectTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#1e293b',
-    marginTop: 10,
-  },
-  docenteMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f8fafc',
-  },
-  docenteMetaText: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  docenteTimeText: {
-    fontSize: 12,
-    color: '#E66711',
-    fontWeight: '800',
-  },
-
-  // Vista Pase de Lista
-  classInfoCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1.5,
-    borderColor: '#0F7F41',
-    marginBottom: SPACING.three,
-  },
-  classBadgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  classTag: {
-    backgroundColor: '#E7F3EC',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  classTagText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
-  classTurnoText: {
-    fontSize: 12,
-    color: '#E66711',
-    fontWeight: '700',
-  },
-  classSubjectTitle: {
+  modalTitle: {
     fontSize: 17,
     fontWeight: '900',
-    color: '#0F7F41',
-    marginTop: 8,
+    color: '#0f172a',
+    textAlign: 'center',
+    marginBottom: 8,
   },
-  classMetaInfo: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 4,
+  modalBody: {
+    fontSize: 13,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 20,
     fontWeight: '500',
   },
-  legendContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: '#ffffff',
-    paddingVertical: 10,
+  modalButton: {
+    width: '100%',
+    height: 48,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: SPACING.three,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#64748b',
-  },
-  studentAttendanceCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  studentInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  studentAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E7F3EC',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#0F7F41',
   },
-  studentAvatarText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#0F7F41',
-  },
-  studentName: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#1e293b',
-  },
-  studentTutor: {
-    fontSize: 11,
-    color: '#841B44',
-    marginTop: 1,
-  },
-  attendanceActionRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  chipAttendance: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#cbd5e1',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-  },
-  chipAttendanceText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#64748b',
-  },
-  chipAttendanceTextActive: {
-    color: '#ffffff',
-  },
-  footerSubmitContainer: {
-    padding: SPACING.four,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#edf2f7',
-  },
-  btnSaveAttendance: {
-    height: 52,
-    backgroundColor: '#0F7F41', // Verde
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...(Platform.OS === 'web'
-      ? { boxShadow: '0px 4px 14px rgba(15, 127, 65, 0.35)' }
-      : {
-          elevation: 4,
-          shadowColor: '#0F7F41',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.35,
-          shadowRadius: 8,
-        }),
-  },
-  btnSaveAttendanceText: {
+  modalButtonText: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
 
-  emptyContainer: {
-    padding: 36,
+  // Estilos del Menú Lateral (Drawer)
+  drawerOverlay: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  drawerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  drawerContent: {
+    width: '80%',
+    maxWidth: 300,
+    height: '100%',
+    zIndex: 10,
+    ...(Platform.OS === 'web'
+      ? { boxShadow: '5px 0px 25px rgba(0, 0, 0, 0.2)' }
+      : {
+          elevation: 16,
+          shadowColor: '#000',
+          shadowOffset: { width: 5, height: 0 },
+          shadowOpacity: 0.3,
+          shadowRadius: 12,
+        }),
+  },
+  drawerHeader: {
+    padding: 24,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+  },
+  drawerAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#ffffff',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 10,
   },
-  emptyTitle: {
-    fontSize: 15,
+  drawerUserName: {
+    color: '#ffffff',
+    fontSize: 16,
     fontWeight: '800',
-    color: '#0F7F41',
   },
-  emptySubtitle: {
+  drawerUserRole: {
+    color: '#e2f4ff',
     fontSize: 12,
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginTop: 4,
+    marginTop: 2,
+    fontWeight: '600',
   },
-  centerLoading: {
-    padding: 40,
+  drawerBody: {
+    flex: 1,
+    paddingVertical: 12,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  drawerItemIcon: {
+    fontSize: 20,
+  },
+  drawerItemText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  drawerFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+  },
+  drawerLogoutBtn: {
+    backgroundColor: '#fee2e2',
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
   },
-  loadingText: {
+  drawerLogoutText: {
+    color: '#ef4444',
     fontSize: 13,
-    color: '#0F7F41',
-    marginTop: 10,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 });
