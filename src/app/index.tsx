@@ -22,7 +22,7 @@ import ProyectoTitulacionView from '../components/ProyectoTitulacion';
 import SubirPagos from '../components/SubirPagos';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api';
+const API_BASE_URL = 'https://apisuie.onrender.com/api';
 
 const SPACING = {
   one: 4,
