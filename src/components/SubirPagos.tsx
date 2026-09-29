@@ -1,29 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
   ActivityIndicator,
-  Alert
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CustomDrawer from '../components/CustomDrawer';
 import { useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = 'https://apisuie.onrender.com/api';
 
 interface SubirPagosProps {
   alumnoId: number;
+  user?: any;
+  userInfo?: any;
   onBack: () => void;
+  onLogout?: () => void;
+  onNavigateTitulacion?: () => void;
 }
 
-export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
+export default function SubirPagos({ 
+  alumnoId, 
+  user,
+  userInfo,
+  onBack,
+  onLogout,
+  onNavigateTitulacion
+}: SubirPagosProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [pagos, setPagos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPago, setSelectedPago] = useState<any>(null);
   const [referencia, setReferencia] = useState('');
+
+  // Estado para el menú lateral desplegable
+  const [menuLateralVisible, setMenuLateralVisible] = useState(false);
 
   const obtenerPagos = async () => {
     setLoading(true);
@@ -86,17 +103,46 @@ export default function SubirPagos({ alumnoId, onBack }: SubirPagosProps) {
     }
   };
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+const semestreAlumno = Number(userInfo?.semestre || 6);
+
+return (
+  <View style={[styles.container, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
+    {/* Drawer con semestre habilitado */}
+    <CustomDrawer
+      visible={menuLateralVisible}
+      onClose={() => setMenuLateralVisible(false)}
+      user={user || { id: alumnoId, rol: 'Estudiante' }}
+      userInfo={userInfo || { id: alumnoId, semestre: 6 }}
+      onLogout={onLogout || (() => {})}
+      semestreAlumno={Number(userInfo?.semestre || 6)}
+      onNavigateHome={() => {
+        setMenuLateralVisible(false);
+        if (onBack) onBack();
+      }}
+      onNavigatePagos={() => setMenuLateralVisible(false)}
+      onNavigateTitulacion={() => {
+        setMenuLateralVisible(false);
+        if (onNavigateTitulacion) onNavigateTitulacion();
+      }}
+    />
+
+      {/* Cabecera */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>
-          <Text style={[styles.backBtnText, { color: colors.primary }]}>← Volver al Horario</Text>
+        <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+          <Text style={{ fontSize: 20 }}>☰</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.primary }]}>Control de Pagos</Text>
-        <View style={{ width: 60 }} />
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, { color: colors.primary }]}>Control de Pagos</Text>
+          <Text style={styles.headerSubCenter}>Módulo Estudiante</Text>
+        </View>
+
+        <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>
+          <Text style={[styles.backBtnText, { color: colors.primary }]}>← Volver</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {loading && !selectedPago ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : selectedPago ? (
@@ -166,9 +212,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, 
     backgroundColor: '#fff' 
   },
+  btnMenuDrawer: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
   btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
   backBtnText: { fontWeight: '800', fontSize: 13 },
   headerTitle: { fontSize: 16, fontWeight: '800' },
+  headerSubCenter: { fontSize: 11, color: '#64748b' },
   scrollContent: { padding: 16, width: '100%', maxWidth: 600, alignSelf: 'center' },
   emptyText: { textAlign: 'center', color: '#64748b', marginTop: 40, fontWeight: '600' },
   pagoCard: { 

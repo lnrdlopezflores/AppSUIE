@@ -1,13 +1,13 @@
-import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Switch,
+  Alert,
   ScrollView,
-  Alert
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
 interface AdminPanelProps {
@@ -17,6 +17,7 @@ interface AdminPanelProps {
 
 export default function AdminPanelTheme({ adminUser, onBack }: AdminPanelProps) {
   const { colors, isVedaElectoral, toggleVedaElectoral } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const handleSwitch = (valor: boolean) => {
     toggleVedaElectoral(valor);
@@ -34,7 +35,7 @@ export default function AdminPanelTheme({ adminUser, onBack }: AdminPanelProps) 
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+    <View style={[styles.container, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>

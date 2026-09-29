@@ -11,12 +11,12 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AdminPanelTheme from '../components/AdminPanelTheme';
+import CustomDrawer from '../components/CustomDrawer';
 import DocenteAsesoriaView from '../components/DocenteAsesor';
 import ProyectoTitulacionView from '../components/ProyectoTitulacion';
 import SubirPagos from '../components/SubirPagos';
@@ -56,6 +56,7 @@ const MAX_CONTENT_WIDTH = 600;
 
 function MainApp() {
   const { colors, isVedaElectoral } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [user, setUser] = useState<any>(null);
   const [username, setUsername] = useState('');
@@ -347,162 +348,41 @@ function MainApp() {
   );
 
   const rolNormalizado = (user?.rol || '').toString().toLowerCase();
-  const semestreActual = Number(horarioAlumno[0]?.grupo?.semestre || alumnoInfo?.semestre || 0);
-  const puedeAccederTitulacion = semestreActual === 6;
-  const tieneAsesorados = proyectosAsesoradosCount > 0;
+  const semestreActual = Number(horarioAlumno[0]?.grupo?.semestre || alumnoInfo?.semestre || 6);
 
-  // Componente Menú Lateral Desplegable
-  const renderMenuLateral = () => (
-    <Modal
-      animationType="fade"
-      transparent={true}
+  // Instancia compartida del Drawer
+  const renderDrawer = () => (
+    <CustomDrawer
       visible={menuLateralVisible}
-      onRequestClose={() => setMenuLateralVisible(false)}
-    >
-      <View style={styles.drawerOverlay}>
-        <TouchableWithoutFeedback onPress={() => setMenuLateralVisible(false)}>
-          <View style={styles.drawerBackdrop} />
-        </TouchableWithoutFeedback>
-
-        <View style={[styles.drawerContent, { backgroundColor: colors.cardBg }]}>
-          {/* Encabezado del Menú */}
-          <View style={[styles.drawerHeader, { backgroundColor: colors.primary }]}>
-            <View style={styles.drawerAvatar}>
-              <Text style={{ fontSize: 24 }}>👤</Text>
-            </View>
-            <Text style={styles.drawerUserName}>
-              {alumnoInfo ? `${limpiarTextoPHP(alumnoInfo?.nombre)} ${limpiarTextoPHP(alumnoInfo?.apellido_paterno)}` : docenteInfo ? `Prof. ${limpiarTextoPHP(docenteInfo?.nombre)}` : user?.username}
-            </Text>
-            <Text style={styles.drawerUserRole}>{user?.rol}</Text>
-          </View>
-
-          {/* Opciones del Menú según el Rol */}
-          <ScrollView style={styles.drawerBody}>
-            {/* Opciones de Alumno */}
-            {(rolNormalizado.includes('estudiante') || rolNormalizado.includes('alumno')) && (
-              <>
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setVistaPagos(false);
-                    setVistaTitulacion(false);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>📅</Text>
-                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Horario Escolar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setVistaTitulacion(false);
-                    setVistaPagos(true);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>💳</Text>
-                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Finanzas y Pagos</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    if (!puedeAccederTitulacion) {
-                      Alert.alert(
-                        'Módulo Bloqueado',
-                        `El módulo de titulación está disponible exclusivamente para alumnos inscritos en 6° semestre (Actualmente te encuentras en ${semestreActual > 0 ? semestreActual + '°' : 'semestre regular'}).`
-                      );
-                      return;
-                    }
-                    setVistaPagos(false);
-                    setVistaTitulacion(true);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>{puedeAccederTitulacion ? '🎓' : '🔒'}</Text>
-                  <Text style={[styles.drawerItemText, { color: puedeAccederTitulacion ? colors.textPrimary : '#94a3b8' }]}>
-                    Proyecto de Titulación
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* Opciones de Docente */}
-            {rolNormalizado.includes('docente') && (
-              <>
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setVistaAsesoriaDocente(false);
-                    setSelectedCarga(null);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>📋</Text>
-                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Pase de Lista y Clases</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    if (!tieneAsesorados) {
-                      Alert.alert(
-                        'Módulo Bloqueado',
-                        'Actualmente no tienes proyectos de titulación asignados como docente asesor.'
-                      );
-                      return;
-                    }
-                    setSelectedCarga(null);
-                    setVistaAsesoriaDocente(true);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>{tieneAsesorados ? '👨‍🏫' : '🔒'}</Text>
-                  <Text style={[styles.drawerItemText, { color: tieneAsesorados ? colors.textPrimary : '#94a3b8' }]}>
-                    Asesoría de Titulación
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* Opciones de Administrador */}
-            {(rolNormalizado.includes('admin') || rolNormalizado.includes('director') || rolNormalizado.includes('control')) && (
-              <>
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setVistaAdminTheme(false);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>🖥️</Text>
-                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Inicio Administrador</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setVistaAdminTheme(true);
-                    setMenuLateralVisible(false);
-                  }}
-                >
-                  <Text style={styles.drawerItemIcon}>🎨</Text>
-                  <Text style={[styles.drawerItemText, { color: colors.textPrimary }]}>Configurar Veda & Tema</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </ScrollView>
-
-          {/* Botón Salir */}
-          <View style={[styles.drawerFooter, { borderTopColor: colors.border }]}>
-            <TouchableOpacity style={styles.drawerLogoutBtn} onPress={handleLogout}>
-              <Text style={styles.drawerLogoutText}>Cerrar Sesión</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
+      onClose={() => setMenuLateralVisible(false)}
+      user={user}
+      userInfo={alumnoInfo || docenteInfo}
+      onLogout={handleLogout}
+      semestreAlumno={semestreActual}
+      proyectosAsesoradosCount={proyectosAsesoradosCount}
+      onNavigateHome={() => {
+        setVistaPagos(false);
+        setVistaTitulacion(false);
+        setVistaAsesoriaDocente(false);
+        setVistaAdminTheme(false);
+        setSelectedCarga(null);
+      }}
+      onNavigatePagos={() => {
+        setVistaTitulacion(false);
+        setVistaPagos(true);
+      }}
+      onNavigateTitulacion={() => {
+        setVistaPagos(false);
+        setVistaTitulacion(true);
+      }}
+      onNavigateAsesoria={() => {
+        setSelectedCarga(null);
+        setVistaAsesoriaDocente(true);
+      }}
+      onNavigateAdminTheme={() => {
+        setVistaAdminTheme(true);
+      }}
+    />
   );
 
   // ============================================================
@@ -510,7 +390,7 @@ function MainApp() {
   // ============================================================
   if (!user) {
     return (
-      <SafeAreaView style={[styles.loginBackground, { backgroundColor: colors.primaryLight }]}>
+      <SafeAreaView edges={["left", "right", "bottom"]} style={[styles.loginBackground, { backgroundColor: colors.primaryLight, paddingTop: insets.top }]}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.loginContainer}
@@ -518,7 +398,7 @@ function MainApp() {
           <View style={[styles.modernCard, { borderColor: colors.primary }]}>
             <View style={styles.brandContainer}>
               <View style={[styles.logoBadge, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Text style={styles.logoBadgeText}>🏛️</Text>
+                <Text style={styles.logoBadgeText}>🏛</Text>
               </View>
               <Text style={[styles.brandTitle, { color: colors.primary }]}>SUIE</Text>
               
@@ -587,9 +467,9 @@ function MainApp() {
     }
 
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={["left", "right", "bottom"]} style={[styles.safeArea, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
         {renderModalNormativo()}
-        {renderMenuLateral()}
+        {renderDrawer()}
         <View style={styles.appHeader}>
           <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
             <Text style={{ fontSize: 20 }}>☰</Text>
@@ -598,13 +478,6 @@ function MainApp() {
             <Text style={[styles.headerTitleCenter, { color: colors.primary }]}>Panel Administrador</Text>
             <Text style={styles.headerSubCenter}>Control Central</Text>
           </View>
-          <TouchableOpacity 
-            style={[styles.btnLogoutModern, { backgroundColor: colors.wineLight, borderColor: colors.wine }]} 
-            onPress={handleLogout}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.btnLogoutText, { color: colors.wine }]}>Salir</Text>
-          </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -628,7 +501,19 @@ function MainApp() {
   // ============================================================
   if (rolNormalizado.includes('estudiante') || rolNormalizado.includes('alumno')) {
     if (vistaPagos) {
-      return <SubirPagos alumnoId={alumnoInfo?.id} onBack={() => setVistaPagos(false)} />;
+      return (
+        <SubirPagos
+          alumnoId={alumnoInfo?.id}
+          user={user}
+          userInfo={alumnoInfo}
+          onLogout={handleLogout}
+          onNavigateTitulacion={() => {
+            setVistaPagos(false);
+            setVistaTitulacion(true);
+          }}
+          onBack={() => setVistaPagos(false)}
+        />
+      );
     }
 
     if (vistaTitulacion) {
@@ -636,6 +521,13 @@ function MainApp() {
         <ProyectoTitulacionView
           alumnoId={alumnoInfo?.id}
           especialidadAlumno={horarioAlumno[0]?.grupo?.especialidad}
+          user={user}
+          userInfo={alumnoInfo}
+          onLogout={handleLogout}
+          onNavigatePagos={() => {
+            setVistaTitulacion(false);
+            setVistaPagos(true);
+          }}
           onBack={() => setVistaTitulacion(false)}
         />
       );
@@ -688,9 +580,9 @@ function MainApp() {
     );
 
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={["left", "right", "bottom"]} style={[styles.safeArea, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
         {renderModalNormativo()}
-        {renderMenuLateral()}
+        {renderDrawer()}
         <View style={styles.appHeader}>
           <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
             <Text style={{ fontSize: 20 }}>☰</Text>
@@ -808,7 +700,7 @@ function MainApp() {
   // ============================================================
   if (selectedCarga) {
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+      <SafeAreaView edges={["left", "right", "bottom"]} style={[styles.safeArea, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
         {renderModalNormativo()}
         <View style={styles.appHeader}>
           <TouchableOpacity style={[styles.btnBack, { backgroundColor: colors.primaryLight }]} onPress={() => setSelectedCarga(null)}>
@@ -915,6 +807,9 @@ function MainApp() {
       <DocenteAsesoriaView
         docenteId={docenteInfo?.id}
         usuarioId={user?.id}
+        user={user}
+        userInfo={docenteInfo}
+        onLogout={handleLogout}
         onBack={() => setVistaAsesoriaDocente(false)}
       />
     );
@@ -923,9 +818,9 @@ function MainApp() {
   const clasesRestantesCount = cargasDocente.length - clasesCompletadas.length;
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView edges={["left", "right", "bottom"]} style={[styles.safeArea, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
       {renderModalNormativo()}
-      {renderMenuLateral()}
+      {renderDrawer()}
       <View style={styles.appHeader}>
         <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
           <Text style={{ fontSize: 20 }}>☰</Text>
@@ -1290,92 +1185,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
-  },
-
-  // Estilos del Menú Lateral (Drawer)
-  drawerOverlay: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  drawerBackdrop: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  drawerContent: {
-    width: '80%',
-    maxWidth: 300,
-    height: '100%',
-    zIndex: 10,
-    ...(Platform.OS === 'web'
-      ? { boxShadow: '5px 0px 25px rgba(0, 0, 0, 0.2)' }
-      : {
-          elevation: 16,
-          shadowColor: '#000',
-          shadowOffset: { width: 5, height: 0 },
-          shadowOpacity: 0.3,
-          shadowRadius: 12,
-        }),
-  },
-  drawerHeader: {
-    padding: 24,
-    alignItems: 'flex-start',
-    justifyContent: 'flex-end',
-  },
-  drawerAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  drawerUserName: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  drawerUserRole: {
-    color: '#e2f4ff',
-    fontSize: 12,
-    marginTop: 2,
-    fontWeight: '600',
-  },
-  drawerBody: {
-    flex: 1,
-    paddingVertical: 12,
-  },
-  drawerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    gap: 14,
-  },
-  drawerItemIcon: {
-    fontSize: 20,
-  },
-  drawerItemText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  drawerFooter: {
-    padding: 16,
-    borderTopWidth: 1,
-  },
-  drawerLogoutBtn: {
-    backgroundColor: '#fee2e2',
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  drawerLogoutText: {
-    color: '#ef4444',
-    fontSize: 13,
-    fontWeight: '800',
   },
 });

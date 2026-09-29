@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,6 +9,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CustomDrawer from '../components/CustomDrawer';
 import { useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = 'https://apisuie.onrender.com/api';
@@ -16,7 +18,10 @@ const API_BASE_URL = 'https://apisuie.onrender.com/api';
 interface DocenteAsesoriaProps {
   docenteId: number;
   usuarioId: number;
+  user?: any;
+  userInfo?: any;
   onBack: () => void;
+  onLogout?: () => void;
 }
 
 const limpiarTextoPHP = (texto: any): string => {
@@ -30,12 +35,23 @@ const limpiarTextoPHP = (texto: any): string => {
   return texto;
 };
 
-export default function DocenteAsesoriaView({ docenteId, usuarioId, onBack }: DocenteAsesoriaProps) {
+export default function DocenteAsesoriaView({ 
+  docenteId, 
+  usuarioId, 
+  user, 
+  userInfo, 
+  onBack, 
+  onLogout 
+}: DocenteAsesoriaProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [proyectos, setProyectos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editandoProyectoId, setEditandoProyectoId] = useState<number | null>(null);
   const [observaciones, setObservaciones] = useState<{ [key: number]: string }>({});
+
+  // Estado para controlar la visibilidad del menú lateral
+  const [menuLateralVisible, setMenuLateralVisible] = useState(false);
 
   const obtenerProyectosAsignados = async () => {
     setLoading(true);
@@ -118,13 +134,30 @@ export default function DocenteAsesoriaView({ docenteId, usuarioId, onBack }: Do
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+    <View style={[styles.container, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
+      {/* Menú lateral con datos completos del usuario y soporte para cámara/notch */}
+      <CustomDrawer
+        visible={menuLateralVisible}
+        onClose={() => setMenuLateralVisible(false)}
+        user={user || { id: usuarioId, rol: 'Docente' }}
+        userInfo={userInfo || { id: docenteId }}
+        onLogout={onLogout || (() => {})}
+        proyectosAsesoradosCount={proyectos.length}
+        onNavigateHome={onBack}
+        onNavigateAsesoria={() => setMenuLateralVisible(false)}
+      />
+
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>
-          <Text style={[styles.btnBackText, { color: colors.primary }]}>← Volver al Panel</Text>
+        <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+          <Text style={{ fontSize: 20 }}>☰</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.primary }]}>Asesoría de Titulación</Text>
-        <View style={{ width: 60 }} />
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, { color: colors.primary }]}>Asesoría de Titulación</Text>
+          <Text style={styles.headerSubCenter}>Módulo Docente</Text>
+        </View>
+
+
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -281,9 +314,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
   },
+  btnMenuDrawer: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
   btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
   btnBackText: { fontWeight: '800', fontSize: 13 },
   headerTitle: { fontSize: 16, fontWeight: '800' },
+  headerSubCenter: { fontSize: 11, color: '#64748b' },
   scrollContent: { padding: 16, width: '100%', maxWidth: 600, alignSelf: 'center' },
   infoBanner: {
     borderWidth: 1,

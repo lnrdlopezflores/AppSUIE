@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CustomDrawer from '../components/CustomDrawer';
 import { useTheme } from '../context/ThemeContext';
 
 const API_BASE_URL = 'https://apisuie.onrender.com/api';
@@ -18,13 +20,28 @@ const API_BASE_URL = 'https://apisuie.onrender.com/api';
 interface ProyectoTitulacionProps {
   alumnoId: number;
   especialidadAlumno?: string;
+  user?: any;
+  userInfo?: any;
   onBack: () => void;
+  onLogout?: () => void;
+  onNavigatePagos?: () => void;
 }
 
-export default function ProyectoTitulacionView({ alumnoId, onBack }: ProyectoTitulacionProps) {
+export default function ProyectoTitulacionView({ 
+  alumnoId, 
+  user,
+  userInfo,
+  onBack,
+  onLogout,
+  onNavigatePagos
+}: ProyectoTitulacionProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [proyectos, setProyectos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Estado para el menú lateral desplegable
+  const [menuLateralVisible, setMenuLateralVisible] = useState(false);
 
   // Estados para editar la documentación del proyecto
   const [proyectoEditandoId, setProyectoEditandoId] = useState<number | null>(null);
@@ -166,18 +183,44 @@ export default function ProyectoTitulacionView({ alumnoId, onBack }: ProyectoTit
     }
   };
 
+  const semestreAlumno = Number(userInfo?.semestre || 6);
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+    <View style={[styles.container, { backgroundColor: colors.bg, paddingTop: insets.top }]}>
+    <CustomDrawer
+      visible={menuLateralVisible}
+      onClose={() => setMenuLateralVisible(false)}
+      user={user || { id: alumnoId, rol: 'Estudiante' }}
+      userInfo={userInfo || { id: alumnoId, semestre: 6 }}
+      onLogout={onLogout || (() => {})}
+      semestreAlumno={Number(userInfo?.semestre || 6)}
+      onNavigateHome={() => {
+        setMenuLateralVisible(false);
+        if (onBack) onBack();
+      }}
+      onNavigatePagos={() => {
+        setMenuLateralVisible(false);
+        if (onNavigatePagos) onNavigatePagos();
+      }}
+      onNavigateTitulacion={() => setMenuLateralVisible(false)}
+    />
       {/* Cabecera */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity style={styles.btnMenuDrawer} onPress={() => setMenuLateralVisible(true)}>
+          <Text style={{ fontSize: 20 }}>☰</Text>
+        </TouchableOpacity>
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, { color: colors.primary }]}>Titulación Escolar</Text>
+          <Text style={styles.headerSubCenter}>Módulo Estudiante</Text>
+        </View>
+
         <TouchableOpacity onPress={onBack} style={[styles.btnBack, { backgroundColor: colors.primaryLight }]}>
           <Text style={[styles.btnBackText, { color: colors.primary }]}>← Volver</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.primary }]}>Titulación Escolar</Text>
-        <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {loading && proyectoEditandoId === null ? (
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
         ) : proyectos.length === 0 ? (
@@ -339,9 +382,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
   },
+  btnMenuDrawer: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
   btnBack: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
   btnBackText: { fontWeight: '800', fontSize: 13 },
   headerTitle: { fontSize: 16, fontWeight: '800' },
+  headerSubCenter: { fontSize: 11, color: '#64748b' },
   scrollContent: { padding: 16, width: '100%', maxWidth: 600, alignSelf: 'center' },
   emptyCard: {
     padding: 36,
